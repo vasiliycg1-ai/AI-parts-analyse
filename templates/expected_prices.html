@@ -1,0 +1,393 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-currency-dollar"></i> Ожидаемые цены продажи</h2>
+    <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Назад
+    </a>
+</div>
+
+<div class="row">
+    <!-- Левая колонка - загрузка файла -->
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-upload"></i> Загрузка из Excel</h5>
+            </div>
+            <div class="card-body">
+                <form id="uploadPriceForm" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label class="form-label">Файл с ценами (.xlsx, .xls)</label>
+                        <input type="file" class="form-control" id="priceFile" accept=".xlsx,.xls" required>
+                        <div class="form-text">
+                            Поддерживаемые колонки: Артикул, Марка, Цена, Дата, Примечание
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-success w-100">
+                        <i class="bi bi-upload"></i> Загрузить цены
+                    </button>
+                </form>
+                <div id="uploadResult" class="mt-3" style="display: none;"></div>
+            </div>
+        </div>
+
+        <!-- Информация о формате файла -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h6><i class="bi bi-info-circle"></i> Формат файла</h6>
+            </div>
+            <div class="card-body">
+                <p class="small mb-2">
+                    <strong>Обязательные колонки:</strong><br>
+                    • Артикул<br>
+                    • Марка<br>
+                    • Цена (в рублях)
+                </p>
+                <p class="small mb-0 text-muted">
+                    <strong>Опционально:</strong><br>
+                    • Дата (если нет - используется текущая)<br>
+                    • Примечание
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Правая колонка - таблица цен -->
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5><i class="bi bi-table"></i> Текущие цены продажи</h5>
+                <span id="pricesCount" class="badge bg-primary">Загрузка...</span>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th>Марка</th>
+                                <th>Артикул</th>
+                                <th>Цена (руб)</th>
+                                <th>Дата</th>
+                                <th>Примечание</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pricesTableBody">
+                            <tr>
+                                <td colspan="6" class="text-center">Загрузка данных...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно редактирования цены -->
+<div class="modal fade" id="editPriceModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Редактирование цены продажи</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editPriceForm">
+                    <input type="hidden" id="editPriceId">
+                    <div class="mb-3">
+                        <label class="form-label">Марка *</label>
+                        <input type="text" class="form-control" id="editBrand" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Артикул *</label>
+                        <input type="text" class="form-control" id="editArticle" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Цена (руб) *</label>
+                        <input type="number" step="0.01" class="form-control" id="editPrice" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Дата действия *</label>
+                        <input type="date" class="form-control" id="editEffectiveDate" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Примечание</label>
+                        <textarea class="form-control" id="editNotes" rows="2"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-info" id="showHistoryBtn">История</button>
+                <button type="button" class="btn btn-primary" onclick="savePrice()">Сохранить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно истории цен -->
+<div class="modal fade" id="historyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="historyModalTitle">История изменения цен</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="historyContent">
+                    <!-- Содержимое будет заполнено через JavaScript -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentPrices = [];
+
+// Загрузка данных при открытии страницы
+document.addEventListener('DOMContentLoaded', function() {
+    loadExpectedPrices();
+});
+
+// Загрузка ожидаемых цен
+function loadExpectedPrices() {
+    fetch('/api/expected_prices')
+        .then(response => response.json())
+        .then(prices => {
+            currentPrices = prices;
+            displayPrices(prices);
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Ошибка при загрузке данных');
+        });
+}
+
+// Отображение цен в таблице
+function displayPrices(prices) {
+    const tbody = document.getElementById('pricesTableBody');
+    const countBadge = document.getElementById('pricesCount');
+    
+    if (prices.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center">Нет данных о ценах</td></tr>';
+        countBadge.textContent = '0 записей';
+        return;
+    }
+    
+    countBadge.textContent = `${prices.length} записей`;
+    
+    tbody.innerHTML = prices.map(price => `
+        <tr>
+            <td>${price.brand_name}</td>
+            <td>${price.main_article}</td>
+            <td class="fw-bold text-success">${price.price_rub.toFixed(2)}</td>
+            <td>${price.effective_date}</td>
+            <td>${price.notes || '-'}</td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary" 
+                        onclick="editPrice(${price.id}, '${price.brand_name}', '${price.main_article}', ${price.price_rub}, '${price.effective_date}', '${price.notes || ''}')">
+                    <i class="bi bi-pencil"></i>
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+// Редактирование цены
+function editPrice(id, brand, article, price, date, notes) {
+    document.getElementById('editPriceId').value = id;
+    document.getElementById('editBrand').value = brand;
+    document.getElementById('editArticle').value = article;
+    document.getElementById('editPrice').value = price;
+    document.getElementById('editEffectiveDate').value = date;
+    document.getElementById('editNotes').value = notes || '';
+    
+    // Настраиваем кнопку истории
+    document.getElementById('showHistoryBtn').onclick = function() {
+        showPriceHistory(id, brand, article);
+    };
+    
+    new bootstrap.Modal(document.getElementById('editPriceModal')).show();
+}
+
+// Сохранение цены
+function savePrice() {
+    const priceData = {
+        brand: document.getElementById('editBrand').value,
+        main_article: document.getElementById('editArticle').value,
+        price_rub: parseFloat(document.getElementById('editPrice').value),
+        effective_date: document.getElementById('editEffectiveDate').value,
+        notes: document.getElementById('editNotes').value
+    };
+
+    const priceId = document.getElementById('editPriceId').value;
+
+    fetch('/api/expected_prices/' + priceId, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(priceData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('editPriceModal')).hide();
+            loadExpectedPrices();
+            alert('Цена успешно обновлена!');
+        } else {
+            alert('Ошибка: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ошибка при сохранении цены');
+    });
+}
+
+// Показать историю цен
+function showPriceHistory(priceId, brand, article) {
+    // Закрываем модальное окно редактирования
+    bootstrap.Modal.getInstance(document.getElementById('editPriceModal')).hide();
+    
+    // Загружаем историю
+    fetch(`/api/expected_prices/history/${getBrandId(brand)}/${article}`)
+        .then(response => response.json())
+        .then(history => {
+            document.getElementById('historyModalTitle').textContent = 
+                `История цен: ${brand} - ${article}`;
+            
+            const historyContent = document.getElementById('historyContent');
+            
+            if (history.length === 0) {
+                historyContent.innerHTML = '<p class="text-muted">Нет данных по истории</p>';
+            } else {
+                historyContent.innerHTML = `
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Дата</th>
+                                    <th>Цена (руб)</th>
+                                    <th>Примечание</th>
+                                    <th>Обновлено</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${history.map(item => `
+                                    <tr ${item.id === priceId ? 'class="table-info"' : ''}>
+                                        <td>${item.effective_date}</td>
+                                        <td class="fw-bold ${item.id === priceId ? 'text-primary' : ''}">
+                                            ${item.price_rub.toFixed(2)}
+                                        </td>
+                                        <td>${item.notes || '-'}</td>
+                                        <td>${item.updated_at.slice(0, 10)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            }
+            
+            new bootstrap.Modal(document.getElementById('historyModal')).show();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Ошибка при загрузке истории');
+        });
+}
+
+// Вспомогательная функция для получения ID бренда
+function getBrandId(brandName) {
+    const price = currentPrices.find(p => p.brand_name === brandName);
+    return price ? price.brand_id : null;
+}
+
+// Загрузка файла с ценами
+document.getElementById('uploadPriceForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const fileInput = document.getElementById('priceFile');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+        alert('Выберите файл для загрузки');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    fetch('/api/expected_prices/upload', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        const resultDiv = document.getElementById('uploadResult');
+        
+        if (data.success) {
+            let message = `
+                <div class="alert alert-success">
+                    <strong>✅ Цены успешно загружены!</strong><br>
+                    Добавлено записей: ${data.added}<br>
+                    Всего обработано: ${data.total}
+            `;
+            
+            if (data.new_brands && data.new_brands.length > 0) {
+                message += `<br><br><strong>⚠️ Добавлены новые бренды:</strong><br>${data.new_brands.join(', ')}`;
+                message += `<br><small class="text-muted">Проверьте нет ли опечаток в названиях брендов</small>`;
+            }
+            
+            message += `</div>`;
+            
+            resultDiv.innerHTML = message;
+            resultDiv.style.display = 'block';
+            fileInput.value = '';
+            
+            // Обновляем таблицу
+            loadExpectedPrices();
+            
+        } else {
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <strong>❌ Ошибка:</strong> ${data.error}
+                </div>
+            `;
+            resultDiv.style.display = 'block';
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        document.getElementById('uploadResult').innerHTML = `
+            <div class="alert alert-danger">
+                <strong>❌ Ошибка при загрузке файла</strong>
+            </div>
+        `;
+        document.getElementById('uploadResult').style.display = 'block';
+    });
+});
+
+// Устанавливаем сегодняшнюю дату по умолчанию в форме редактирования
+document.getElementById('editEffectiveDate').value = new Date().toISOString().split('T')[0];
+</script>
+
+<style>
+.table td {
+    vertical-align: middle;
+}
+.text-success {
+    color: #198754 !important;
+    font-weight: bold;
+}
+</style>
+{% endblock %}

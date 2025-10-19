@@ -1,0 +1,3 @@
+# .env
+FLASK_ENV=production
+SECRET_KEY=8f42a73054b1749b8f6d6a7e8f8c2b9a1d3e5f7a9c8b4e2f6a1d9c8e7f5a3b2

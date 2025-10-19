@@ -1,0 +1,533 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-graph-up-arrow"></i> Статистика продаж</h2>
+    <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Назад
+    </a>
+</div>
+
+<!-- Фильтры и управление -->
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">Тип данных</label>
+                <select class="form-select" id="dataTypeFilter" onchange="loadStatistics()">
+                    <option value="all">Все типы</option>
+                    <option value="own_sales">Мои продажи</option>
+                    <option value="competitor_sales">Продажи конкурентов</option>
+                    <option value="analytics_center">Аналитический центр</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Группа спроса</label>
+                <select class="form-select" id="volumeGroupFilter" onchange="loadStatistics()">
+                    <option value="all">Все группы</option>
+                    <option value="top_sales">Топ продаж</option>
+                    <option value="good_demand">Хороший спрос</option>
+                    <option value="low_demand">Низкий спрос</option>
+                    <option value="no_demand">Отсутствие спроса</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Поиск по артикулу</label>
+                <input type="text" class="form-control" id="searchFilter" placeholder="Артикул или марка..." oninput="loadStatistics()">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">&nbsp;</label>
+                <button class="btn btn-outline-secondary w-100" onclick="clearFilters()">
+                    <i class="bi bi-x-circle"></i> Сброс
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Левая колонка - загрузка данных -->
+    <div class="col-lg-4">
+        <!-- Формы загрузки для каждого типа данных -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5><i class="bi bi-upload"></i> Загрузка статистики</h5>
+            </div>
+            <div class="card-body">
+                <ul class="nav nav-tabs" id="uploadTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#ownSalesTab" type="button">
+                            Мои продажи
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#competitorTab" type="button">
+                            Конкуренты
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#analyticsTab" type="button">
+                            Аналитика
+                        </button>
+                    </li>
+                </ul>
+                
+                <div class="tab-content mt-3">
+                    <!-- Мои продажи -->
+                    <div class="tab-pane fade show active" id="ownSalesTab">
+                        <form class="upload-form" data-type="own_sales">
+                            <div class="mb-3">
+                                <label class="form-label">Файл с продажами</label>
+                                <input type="file" class="form-control" accept=".xlsx,.xls" required>
+                                <div class="form-text">
+                                    Колонки: Артикул, Марка, Период, Количество
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-success w-100">
+                                <i class="bi bi-upload"></i> Загрузить мои продажи
+                            </button>
+                        </form>
+                    </div>
+                    
+                    <!-- Продажи конкурентов -->
+                    <div class="tab-pane fade" id="competitorTab">
+                        <form class="upload-form" data-type="competitor_sales">
+                            <div class="mb-3">
+                                <label class="form-label">Файл с данными конкурентов</label>
+                                <input type="file" class="form-control" accept=".xlsx,.xls" required>
+                                <div class="form-text">
+                                    Колонки: Артикул, Марка, Период, Количество, Источник
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-warning w-100">
+                                <i class="bi bi-upload"></i> Загрузить данные конкурентов
+                            </button>
+                        </form>
+                    </div>
+                    
+                    <!-- Аналитический центр -->
+                    <div class="tab-pane fade" id="analyticsTab">
+                        <form class="upload-form" data-type="analytics_center">
+                            <div class="mb-3">
+                                <label class="form-label">Файл аналитики</label>
+                                <input type="file" class="form-control" accept=".xlsx,.xls" required>
+                                <div class="form-text">
+                                    Колонки: Артикул, Марка, Период, Группа, Запросы
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-info w-100">
+                                <i class="bi bi-upload"></i> Загрузить аналитику
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                
+                <div id="uploadResult" class="mt-3" style="display: none;"></div>
+            </div>
+        </div>
+
+        <!-- Информация о форматах -->
+        <div class="card">
+            <div class="card-header">
+                <h6><i class="bi bi-info-circle"></i> Форматы файлов</h6>
+            </div>
+            <div class="card-body">
+                <p class="small mb-2">
+                    <strong>Обязательные для всех:</strong><br>
+                    • Артикул<br>
+                    • Марка<br>
+                    • Период (ГГГГ-ММ-ДД)
+                </p>
+                <p class="small mb-0 text-muted">
+                    <strong>Дополнительно:</strong><br>
+                    • <strong>Мои продажи:</strong> Количество<br>
+                    • <strong>Конкуренты:</strong> Количество, Источник<br>
+                    • <strong>Аналитика:</strong> Группа, Запросы
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Правая колонка - таблица статистики -->
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5><i class="bi bi-table"></i> Статистика продаж</h5>
+                <span id="statsCount" class="badge bg-primary">Загрузка...</span>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th>Тип данных</th>
+                                <th>Марка</th>
+                                <th>Артикул</th>
+                                <th>Период</th>
+                                <th>Количество</th>
+                                <th>Группа</th>
+                                <th>Запросы</th>
+                                <th>Источник</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody id="statsTableBody">
+                            <tr>
+                                <td colspan="9" class="text-center">Загрузка данных...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно редактирования -->
+<div class="modal fade" id="editStatModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Редактирование статистики</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editStatForm">
+                    <input type="hidden" id="editStatId">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Тип данных *</label>
+                            <select class="form-select" id="editDataType" required>
+                                <option value="own_sales">Мои продажи</option>
+                                <option value="competitor_sales">Продажи конкурентов</option>
+                                <option value="analytics_center">Аналитический центр</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Период *</label>
+                            <input type="date" class="form-control" id="editPeriod" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Марка *</label>
+                            <input type="text" class="form-control" id="editBrand" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Артикул *</label>
+                            <input type="text" class="form-control" id="editArticle" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Количество</label>
+                            <input type="number" class="form-control" id="editQuantity">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Группа спроса</label>
+                            <select class="form-select" id="editVolumeGroup">
+                                <option value="">Не указана</option>
+                                <option value="top_sales">Топ продаж</option>
+                                <option value="good_demand">Хороший спрос</option>
+                                <option value="low_demand">Низкий спрос</option>
+                                <option value="no_demand">Отсутствие спроса</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Запросов/месяц</label>
+                            <input type="number" class="form-control" id="editRequests">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Источник</label>
+                            <input type="text" class="form-control" id="editSource">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Примечание</label>
+                            <textarea class="form-control" id="editNotes" rows="2"></textarea>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-danger" onclick="deleteStat()">Удалить</button>
+                <button type="button" class="btn btn-primary" onclick="saveStat()">Сохранить</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentStats = [];
+
+// Загрузка данных при открытии страницы
+document.addEventListener('DOMContentLoaded', function() {
+    loadStatistics();
+    setupUploadForms();
+});
+
+// Загрузка статистики с фильтрами
+function loadStatistics() {
+    const dataType = document.getElementById('dataTypeFilter').value;
+    const volumeGroup = document.getElementById('volumeGroupFilter').value;
+    const search = document.getElementById('searchFilter').value;
+    
+    let url = '/api/sales_statistics';
+    const params = new URLSearchParams();
+    
+    if (dataType !== 'all') params.append('data_type', dataType);
+    if (volumeGroup !== 'all') params.append('volume_group', volumeGroup);  // ← ДОБАВИЛИ
+    if (search) params.append('search', search);
+    
+    if (params.toString()) url += '?' + params.toString();
+    
+    fetch(url)
+        .then(response => response.json())
+        .then(stats => {
+            currentStats = stats;
+            displayStats(stats);
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Ошибка при загрузке данных');
+        });
+}
+
+// Отображение статистики в таблице
+function displayStats(stats) {
+    const tbody = document.getElementById('statsTableBody');
+    const countBadge = document.getElementById('statsCount');
+    
+    if (stats.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center">Нет данных по выбранным фильтрам</td></tr>';
+        countBadge.textContent = '0 записей';
+        return;
+    }
+    
+    countBadge.textContent = `${stats.length} записей`;
+    
+    tbody.innerHTML = stats.map(stat => {
+        const typeBadge = getDataTypeBadge(stat.data_type);
+        const groupBadge = getVolumeGroupBadge(stat.volume_group);
+        
+        return `
+            <tr>
+                <td>${typeBadge}</td>
+                <td>${stat.brand_name}</td>
+                <td>${stat.main_article}</td>
+                <td>${stat.period}</td>
+                <td>${stat.quantity ? `<span class="fw-bold">${stat.quantity} шт</span>` : '-'}</td>
+                <td>${groupBadge}</td>
+                <td>${stat.requests_per_month || '-'}</td>
+                <td>${stat.source_name || '-'}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" 
+                            onclick="editStat(${stat.id})">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// Вспомогательные функции для бейджей
+function getDataTypeBadge(dataType) {
+    const badges = {
+        'own_sales': '<span class="badge bg-success">Мои продажи</span>',
+        'competitor_sales': '<span class="badge bg-warning">Конкуренты</span>',
+        'analytics_center': '<span class="badge bg-info">Аналитика</span>'
+    };
+    return badges[dataType] || dataType;
+}
+
+function getVolumeGroupBadge(volumeGroup) {
+    const badges = {
+        'top_sales': '<span class="badge bg-danger">Топ продаж</span>',
+        'good_demand': '<span class="badge bg-success">Хороший спрос</span>',
+        'low_demand': '<span class="badge bg-warning">Низкий спрос</span>',
+        'no_demand': '<span class="badge bg-secondary">Отсутствие спроса</span>'
+    };
+    return badges[volumeGroup] || '-';
+}
+
+// Настройка форм загрузки
+function setupUploadForms() {
+    document.querySelectorAll('.upload-form').forEach(form => {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const fileInput = this.querySelector('input[type="file"]');
+            const dataType = this.dataset.type;
+            uploadStatistics(fileInput.files[0], dataType);
+        });
+    });
+}
+
+// Загрузка файла
+function uploadStatistics(file, dataType) {
+    if (!file) {
+        alert('Выберите файл для загрузки');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('data_type', dataType);
+
+    fetch('/api/sales_statistics/upload', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        const resultDiv = document.getElementById('uploadResult');
+        
+        if (data.success) {
+            let message = `
+                <div class="alert alert-success">
+                    <strong>✅ Статистика успешно загружена!</strong><br>
+                    Добавлено записей: ${data.added}<br>
+                    Обновлено записей: ${data.updated}<br>
+                    Всего обработано: ${data.total}
+            `;
+            
+            if (data.new_brands && data.new_brands.length > 0) {
+                message += `<br><br><strong>⚠️ Добавлены новые бренды:</strong><br>${data.new_brands.join(', ')}`;
+                message += `<br><small class="text-muted">Проверьте нет ли опечаток в названиях брендов</small>`;
+            }
+            
+            message += `</div>`;
+            
+            resultDiv.innerHTML = message;
+            resultDiv.style.display = 'block';
+            
+            // Очищаем поле файла и обновляем таблицу
+            document.querySelectorAll('input[type="file"]').forEach(input => input.value = '');
+            loadStatistics();
+            
+        } else {
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <strong>❌ Ошибка:</strong> ${data.error}
+                </div>
+            `;
+            resultDiv.style.display = 'block';
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        document.getElementById('uploadResult').innerHTML = `
+            <div class="alert alert-danger">
+                <strong>❌ Ошибка при загрузке файла</strong>
+            </div>
+        `;
+        document.getElementById('uploadResult').style.display = 'block';
+    });
+}
+
+// Редактирование статистики
+function editStat(statId) {
+    const stat = currentStats.find(s => s.id === statId);
+    if (!stat) return;
+    
+    document.getElementById('editStatId').value = stat.id;
+    document.getElementById('editDataType').value = stat.data_type;
+    document.getElementById('editPeriod').value = stat.period;
+    document.getElementById('editBrand').value = stat.brand_name;
+    document.getElementById('editArticle').value = stat.main_article;
+    document.getElementById('editQuantity').value = stat.quantity || '';
+    document.getElementById('editVolumeGroup').value = stat.volume_group || '';
+    document.getElementById('editRequests').value = stat.requests_per_month || '';
+    document.getElementById('editSource').value = stat.source_name || '';
+    document.getElementById('editNotes').value = stat.notes || '';
+    
+    new bootstrap.Modal(document.getElementById('editStatModal')).show();
+}
+
+// Сохранение статистики
+function saveStat() {
+    const statData = {
+        data_type: document.getElementById('editDataType').value,
+        period: document.getElementById('editPeriod').value,
+        brand: document.getElementById('editBrand').value,
+        main_article: document.getElementById('editArticle').value,
+        quantity: document.getElementById('editQuantity').value || null,
+        volume_group: document.getElementById('editVolumeGroup').value || null,
+        requests_per_month: document.getElementById('editRequests').value || null,
+        source_name: document.getElementById('editSource').value || '',
+        notes: document.getElementById('editNotes').value || ''
+    };
+
+    const statId = document.getElementById('editStatId').value;
+
+    fetch('/api/sales_statistics/' + statId, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(statData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('editStatModal')).hide();
+            loadStatistics();
+            alert('Статистика успешно обновлена!');
+        } else {
+            alert('Ошибка: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ошибка при сохранении статистики');
+    });
+}
+
+// Удаление статистики
+function deleteStat() {
+    if (!confirm('Удалить эту запись статистики?')) return;
+    
+    const statId = document.getElementById('editStatId').value;
+
+    fetch('/api/sales_statistics/' + statId, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('editStatModal')).hide();
+            loadStatistics();
+            alert('Запись статистики удалена!');
+        } else {
+            alert('Ошибка при удалении');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ошибка при удалении статистики');
+    });
+}
+
+// Сброс фильтров
+function clearFilters() {
+    document.getElementById('dataTypeFilter').value = 'all';
+    document.getElementById('volumeGroupFilter').value = 'all';
+    document.getElementById('searchFilter').value = '';
+    loadStatistics();
+}
+
+// Устанавливаем текущий месяц по умолчанию в форме редактирования
+document.getElementById('editPeriod').value = new Date().toISOString().split('T')[0];
+</script>
+
+<style>
+.table td {
+    vertical-align: middle;
+}
+.nav-tabs .nav-link {
+    font-size: 0.9rem;
+    padding: 0.5rem 0.75rem;
+}
+.badge {
+    font-size: 0.75rem;
+}
+</style>
+{% endblock %}

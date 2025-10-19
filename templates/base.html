@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Анализ цен на автозапчасти</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css  " rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css  " rel="stylesheet">
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="{{ url_for('index') }}">
+            <i class="bi bi-gear"></i> Анализ цен
+        </a>
+        
+        {% if session.get('authenticated') or not config.REQUIRE_AUTH %}
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav me-auto">
+                    <!-- Главное меню -->
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('index') }}">
+                            <i class="bi bi-upload"></i> Загрузка
+                        </a>
+                    </li>
+                    
+                    <!-- Выпадающее меню: Аналитика -->
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-graph-up"></i> Аналитика
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="{{ url_for('analysis') }}">
+                                <i class="bi bi-speedometer2"></i> Общий анализ цен
+                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('supplier_comparison') }}">
+                                <i class="bi bi-compare"></i> Сравнение поставщиков
+                            </a></li>
+                            <!-- НОВЫЙ ПУНКТ МЕНЮ -->
+                            <li><a class="dropdown-item" href="{{ url_for('match_brands_page') }}">
+                                <i class="bi bi-search-heart"></i> <!-- Иконка на выбор -->
+                                Сопоставление артикулов с брендами
+                            </a></li>
+                            <!-- /НОВЫЙ ПУНКТ МЕНЮ -->
+                        </ul>
+                    </li>
+                    
+                    <!-- Выпадающее меню: Данные -->
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-database"></i> Данные
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="{{ url_for('manage_price_lists') }}">
+                                <i class="bi bi-file-earmark-spreadsheet"></i> Прайс-листы
+                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('catalog_management') }}">
+                                <i class="bi bi-box"></i> Каталог запчастей
+                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('manage_sales_statistics') }}">
+                                <i class="bi bi-graph-up-arrow"></i> Статистика продаж
+                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('manage_expected_prices') }}">
+                                <i class="bi bi-currency-dollar"></i> Цены продажи
+                            </a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('manage_currency_rates') }}">
+                                <i class="bi bi-currency-exchange"></i> Курсы валют
+                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('manage_delivery_costs') }}">
+                                <i class="bi bi-truck"></i> Стоимость доставки
+                            </a></li>
+                        </ul>
+                    </li>
+                    
+                    <!-- Выпадающее меню: Справочники -->
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-book"></i> Справочники
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="{{ url_for('manage_regions') }}">
+                                <i class="bi bi-globe"></i> Регионы
+                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('manage_brands') }}">
+                                <i class="bi bi-tag"></i> Бренды
+                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('manage_suppliers') }}">
+                                <i class="bi bi-truck"></i> Поставщики
+                            </a></li>
+                        </ul>
+                    </li>
+                </ul>
+            <!-- Блок пользователя -->
+            <div class="navbar-nav">
+                {% if config.REQUIRE_AUTH %}
+                <div class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        <i class="bi bi-person-circle"></i> 
+                        {{ session.get('user_name', 'Пользователь') }}
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="{{ url_for('logout') }}">
+                            <i class="bi bi-box-arrow-right"></i> Выйти
+                        </a></li>
+                    </ul>
+                </div>
+                {% else %}
+                <span class="navbar-text text-light">
+                    <i class="bi bi-laptop"></i> Локальный режим
+                </span>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</nav>
+    <div class="container mt-4">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'danger' if category == 'error' else 'success' if category == 'success' else 'info' }} alert-dismissible fade show">
+                        {{ message | safe }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js  "></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

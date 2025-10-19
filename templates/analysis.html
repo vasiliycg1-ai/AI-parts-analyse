@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-graph-up"></i> Анализ цен</h2>
+    <div>
+        <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Назад
+        </a>
+        <button class="btn btn-success" onclick="exportToExcel()">
+            <i class="bi bi-download"></i> Экспорт в Excel
+        </button>
+    </div>
+</div>
+
+<!-- Фильтры -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5><i class="bi bi-funnel"></i> Фильтры</h5>
+    </div>
+    <div class="card-body">
+        <form id="filterForm" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">Марка</label>
+                <select class="form-select" id="brandFilter" onchange="filterTable()">
+                    <option value="">Все марки</option>
+                    {% for brand in brands %}
+                    <option value="{{ brand }}">{{ brand }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Артикул</label>
+                <input type="text" class="form-control" id="articleFilter" 
+                       placeholder="Поиск по артикулу" oninput="filterTable()">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Поставщик</label>
+                <select class="form-select" id="supplierFilter" onchange="filterTable()">
+                    <option value="">Все поставщики</option>
+                    {% for supplier in suppliers %}
+                    <option value="{{ supplier }}">{{ supplier }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Регион</label>
+                <select class="form-select" id="regionFilter" onchange="filterTable()">
+                    <option value="">Все регионы</option>
+                    {% for region in regions %}
+                    <option value="{{ region }}">{{ region }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12">
+                <button type="button" class="btn btn-outline-secondary" onclick="clearFilters()">
+                    <i class="bi bi-x-circle"></i> Сбросить фильтры
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        {% if parts %}
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                Показано: <span id="shownCount">{{ parts|length }}</span> из {{ parts|length }} записей
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="showOnlyChanges" onchange="filterTable()">
+                <label class="form-check-label" for="showOnlyChanges">
+                    Только с изменением цен
+                </label>
+            </div>
+        </div>
+
+<div class="table-responsive">
+    <table class="table table-striped" id="analysisTable">
+        <thead>
+            <tr>
+                <th>Марка</th>
+                <th>Артикул</th>
+                <th>Название</th>
+                <th>Лучшая цена</th>
+                <th>Поставщик</th>
+                <th>Регион</th>
+                <th>Дата</th>
+                <th>Все предложения</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for part in parts %}
+            <tr class="data-row">
+                <td class="brand">{{ part.brand }}</td>
+                <td class="article">{{ part.main_article }}</td>
+                <td>{{ part.name_ru or '-' }}</td>
+                <td class="text-success fw-bold">
+                    {{ "%.2f"|format(part.best_price_rub) }} руб.
+                    {% if part.best_currency != 'RUB' %}
+                    <br>
+                    <small class="text-muted">
+                        ({{ "%.2f"|format(part.best_original_price) }} {{ part.best_currency }})
+                    </small>
+                    {% endif %}
+                </td>
+                <td class="supplier">{{ part.best_supplier }}</td>
+                <td class="region">{{ part.best_region }}</td>
+                <td>{{ part.best_date }}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-info" 
+                            onclick="showSuppliers('{{ part.main_article }}', '{{ part.all_suppliers }}')"
+                            title="Показать все предложения">
+                        <i class="bi bi-list"></i> {{ part.all_suppliers.count(')') }} предлож.
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+        {% else %}
+        <p class="text-muted">Нет данных для анализа. Загрузите прайс-листы.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Модальное окно всех предложений -->
+<div class="modal fade" id="suppliersModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="suppliersModalTitle">Все предложения</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="suppliersModalBody">
+                <!-- Содержимое будет заполнено через JavaScript -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+// Получаем уникальные значения для фильтров
+const brands = Array.from(new Set(Array.from(document.querySelectorAll('.brand')).map(td => td.textContent))).sort();
+const suppliers = Array.from(new Set(Array.from(document.querySelectorAll('.supplier')).map(td => td.textContent))).sort();
+const regions = Array.from(new Set(Array.from(document.querySelectorAll('.region')).map(td => td.textContent))).sort();
+
+// Заполняем выпадающие списки
+function populateFilters() {
+    const brandSelect = document.getElementById('brandFilter');
+    brands.forEach(brand => {
+        if (brand && brand.trim() !== '') {
+            const option = document.createElement('option');
+            option.value = brand;
+            option.textContent = brand;
+            brandSelect.appendChild(option);
+        }
+    });
+
+    const supplierSelect = document.getElementById('supplierFilter');
+    suppliers.forEach(supplier => {
+        if (supplier && supplier.trim() !== '') {
+            const option = document.createElement('option');
+            option.value = supplier;
+            option.textContent = supplier;
+            supplierSelect.appendChild(option);
+        }
+    });
+
+    const regionSelect = document.getElementById('regionFilter');
+    regions.forEach(region => {
+        if (region && region.trim() !== '') {
+            const option = document.createElement('option');
+            option.value = region;
+            option.textContent = region;
+            regionSelect.appendChild(option);
+        }
+    });
+}
+
+// Функция фильтрации
+function filterTable() {
+    const brandFilter = document.getElementById('brandFilter').value.toLowerCase();
+    const articleFilter = document.getElementById('articleFilter').value.toLowerCase();
+    const supplierFilter = document.getElementById('supplierFilter').value.toLowerCase();
+    const regionFilter = document.getElementById('regionFilter').value.toLowerCase();
+    const showOnlyChanges = document.getElementById('showOnlyChanges').checked;
+
+    const rows = document.querySelectorAll('.data-row');
+    let visibleCount = 0;
+
+    rows.forEach(row => {
+        const brand = row.querySelector('.brand').textContent.toLowerCase();
+        const article = row.querySelector('.article').textContent.toLowerCase();
+        const supplier = row.querySelector('.supplier').textContent.toLowerCase();
+        const region = row.querySelector('.region').textContent.toLowerCase();
+        const hasChange = row.querySelector('.badge') !== null;
+
+        const matchesBrand = !brandFilter || brand.includes(brandFilter);
+        const matchesArticle = !articleFilter || article.includes(articleFilter);
+        const matchesSupplier = !supplierFilter || supplier.includes(supplierFilter);
+        const matchesRegion = !regionFilter || region.includes(regionFilter);
+        const matchesChanges = !showOnlyChanges || hasChange;
+
+        const isVisible = matchesBrand && matchesArticle && matchesSupplier && matchesRegion && matchesChanges;
+        
+        row.style.display = isVisible ? '' : 'none';
+        if (isVisible) visibleCount++;
+    });
+
+    document.getElementById('shownCount').textContent = visibleCount;
+}
+
+// Сброс фильтров
+function clearFilters() {
+    document.getElementById('brandFilter').value = '';
+    document.getElementById('articleFilter').value = '';
+    document.getElementById('supplierFilter').value = '';
+    document.getElementById('regionFilter').value = '';
+    document.getElementById('showOnlyChanges').checked = false;
+    filterTable();
+}
+
+// Экспорт в Excel
+function exportToExcel() {
+    const table = document.getElementById('analysisTable');
+    const wb = XLSX.utils.table_to_book(table, {sheet: "Анализ цен"});
+    XLSX.writeFile(wb, "анализ_цен_{{ now.strftime('%Y-%m-%d') if now else '' }}.xlsx");
+}
+
+// Инициализация при загрузке
+document.addEventListener('DOMContentLoaded', function() {
+    populateFilters();
+    filterTable(); // Применяем фильтры сразу
+});
+
+// Показ всех предложений
+function showSuppliers(article, suppliersData) {
+    const modalTitle = document.getElementById('suppliersModalTitle');
+    const modalBody = document.getElementById('suppliersModalBody');
+    
+    modalTitle.textContent = `Все предложения для артикула: ${article}`;
+    
+    // Парсим данные о поставщиках
+    const suppliers = suppliersData.split(',');
+    let html = '<div class="list-group">';
+    
+    suppliers.forEach(supplier => {
+        if (supplier.trim()) {
+            html += `
+                <div class="list-group-item">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span>${supplier.trim()}</span>
+                    </div>
+                </div>
+            `;
+        }
+    });
+    
+    html += '</div>';
+    modalBody.innerHTML = html;
+    
+    new bootstrap.Modal(document.getElementById('suppliersModal')).show();
+}
+
+
+
+
+</script>
+
+<style>
+#articleFilter {
+    text-transform: uppercase;
+}
+.badge.bg-success {
+    background-color: #198754 !important;
+}
+.badge.bg-danger {
+    background-color: #dc3545 !important;
+}
+.badge.bg-secondary {
+    background-color: #6c757d !important;
+}
+</style>
+{% endblock %}

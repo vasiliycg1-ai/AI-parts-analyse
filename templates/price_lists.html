@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-file-earmark-spreadsheet"></i> Управление прайс-листами</h2>
+    <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Назад
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        {% if price_lists %}
+        <div class="table-responsive">
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Файл</th>
+            <th>Поставщик</th>
+            <th>Регион</th>
+            <th>Дата загрузки</th>
+            <th>Описание</th>  <!-- НОВАЯ КОЛОНКА -->
+            <th>Статус</th>
+            <th>Действия</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for pl in price_lists %}
+        <tr>
+            <td>{{ pl.id }}</td>
+            <td>{{ pl.file_name }}</td>
+            <td>{{ pl.supplier_name }}</td>
+            <td>{{ pl.region_name }}</td>
+            <td>{{ pl.upload_date }}</td>
+            <td>
+                {% if pl.description %}
+                <span title="{{ pl.description }}">{{ pl.description[:50] }}{% if pl.description|length > 50 %}...{% endif %}</span>
+                {% else %}
+                <span class="text-muted">—</span>
+                {% endif %}
+            </td>
+            <td>
+                <span class="badge bg-{{ 'success' if pl.is_active else 'secondary' }}">
+                    {{ 'Активен' if pl.is_active else 'Неактивен' }}
+                </span>
+            </td>
+            <td>
+                <button class="btn btn-sm btn-{{ 'warning' if pl.is_active else 'success' }} toggle-btn"
+                        data-id="{{ pl.id }}">
+                    <i class="bi bi-{{ 'x-circle' if pl.is_active else 'check-circle' }}"></i>
+                    {{ 'Отключить' if pl.is_active else 'Включить' }}
+                </button>
+                <!-- Добавляем кнопку редактирования описания -->
+                <button class="btn btn-sm btn-outline-primary edit-desc-btn"
+                        data-id="{{ pl.id }}"
+                        data-desc="{{ pl.description or '' }}">
+                    <i class="bi bi-pencil"></i>
+                </button>
+
+    <!-- НОВАЯ КНОПКА АНАЛИЗА -->
+    <a href="{{ url_for('price_list_analysis', price_list_id=pl.id) }}" 
+       class="btn btn-sm btn-info" title="Анализ прайс-листа">
+        <i class="bi bi-graph-up"></i>
+    </a>
+
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+
+        </div>
+        {% else %}
+        <p class="text-muted">Нет загруженных прайс-листов</p>
+        {% endif %}
+    </div>
+</div>
+
+
+<!-- Модальное окно редактирования описания -->
+<div class="modal fade" id="editDescModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Редактирование описания</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editDescForm">
+                    <input type="hidden" id="editPriceListId">
+                    <div class="mb-3">
+                        <label class="form-label">Описание прайс-листа</label>
+                        <textarea class="form-control" id="editPriceListDesc" rows="3" 
+                                  placeholder="Добавьте описание для этого прайс-листа..."></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary" onclick="saveDescription()">Сохранить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.toggle-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const priceListId = this.getAttribute('data-id');
+            
+            fetch('/api/toggle_price_list/' + priceListId, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload(); // Перезагружаем страницу
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Ошибка при изменении статуса');
+            });
+        });
+    });
+});
+
+// Редактирование описания
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.edit-desc-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const priceListId = this.getAttribute('data-id');
+            const currentDesc = this.getAttribute('data-desc');
+            
+            document.getElementById('editPriceListId').value = priceListId;
+            document.getElementById('editPriceListDesc').value = currentDesc;
+            
+            new bootstrap.Modal(document.getElementById('editDescModal')).show();
+        });
+    });
+});
+
+// Сохранение описания
+function saveDescription() {
+    const priceListId = document.getElementById('editPriceListId').value;
+    const description = document.getElementById('editPriceListDesc').value;
+    
+    fetch(`/api/price_lists/${priceListId}/description`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({description: description})
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('editDescModal')).hide();
+            location.reload(); // Перезагружаем страницу для обновления данных
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ошибка при сохранении описания');
+    });
+}
+
+
+
+
+</script>
+{% endblock %}
+
+
+

@@ -1,0 +1,356 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-compare"></i> Сравнение поставщиков</h2>
+    <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Назад
+    </a>
+</div>
+
+<!-- Форма выбора поставщиков -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5><i class="bi bi-people"></i> Выбор поставщиков для сравнения</h5>
+    </div>
+    <div class="card-body">
+        <form id="comparisonForm" class="row g-3">
+            <div class="col-md-5">
+                <label class="form-label">Поставщик 1 *</label>
+                <select class="form-select" id="supplier1" name="supplier1" required>
+                    <option value="">-- Выберите первого поставщика --</option>
+                    {% for supplier in suppliers %}
+                    <option value="{{ supplier.id }}">{{ supplier.name }} ({{ supplier.region_name }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-5">
+                <label class="form-label">Поставщик 2</label>
+                <select class="form-select" id="supplier2" name="supplier2">
+                    <option value="">-- Выберите второго поставщика --</option>
+                    {% for supplier in suppliers %}
+                    <option value="{{ supplier.id }}">{{ supplier.name }} ({{ supplier.region_name }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">&nbsp;</label>
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-search"></i> Сравнить
+                </button>
+            </div>
+            <div class="col-12">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="showAll" name="showAll">
+                    <label class="form-check-label" for="showAll">
+                        Показывать все детали поставщика 1 (включая отсутствующие у поставщика 2)
+                    </label>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Результаты сравнения -->
+<div class="card" id="resultsCard" style="display: none;">
+    <div class="card-header">
+        <h5><i class="bi bi-table"></i> Результаты сравнения</h5>
+    </div>
+    <div class="card-body">
+        <!-- Фильтры результатов -->
+        <div class="row mb-3" id="filtersRow" style="display: none;">
+            <div class="col-md-3">
+                <label class="form-label">Марка</label>
+                <select class="form-select" id="brandFilter">
+                    <option value="">Все марки</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Артикул</label>
+                <input type="text" class="form-control" id="articleFilter" placeholder="Поиск по артикулу">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Только пересечение</label>
+                <select class="form-select" id="intersectionFilter">
+                    <option value="all">Все детали</option>
+                    <option value="intersection">Только общие детали</option>
+                    <option value="unique">Только уникальные детали</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">&nbsp;</label>
+                <button class="btn btn-outline-secondary w-100" onclick="clearComparisonFilters()">
+                    <i class="bi bi-x-circle"></i> Сбросить
+                </button>
+            </div>
+        </div>
+
+        <!-- Статистика -->
+        <div class="alert alert-info" id="statsAlert" style="display: none;">
+            <i class="bi bi-info-circle"></i> 
+            <span id="statsText"></span>
+        </div>
+
+        <!-- Таблица результатов -->
+        <div class="table-responsive">
+            <table class="table table-striped" id="comparisonTable">
+                <thead>
+                    <tr>
+                        <th>Марка</th>
+                        <th>Артикул</th>
+                        <th>Название</th>
+                        <th id="supplier1Header">Поставщик 1</th>
+                        <th id="supplier2Header">Поставщик 2</th>
+                        <th>Разница</th>
+                        <th>Статус</th>
+                    </tr>
+                </thead>
+                <tbody id="comparisonBody">
+                    <!-- Данные будут заполняться через JavaScript -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mt-3">
+            <span id="resultsCount">Показано 0 записей</span>
+            <button class="btn btn-success" onclick="exportComparisonToExcel()">
+                <i class="bi bi-download"></i> Экспорт в Excel
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Индикатор загрузки -->
+<div class="text-center mt-4" id="loadingSpinner" style="display: none;">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Загрузка...</span>
+    </div>
+    <p class="mt-2">Загрузка данных сравнения...</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+let comparisonData = [];
+
+document.getElementById('comparisonForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    loadComparisonData();
+});
+
+function loadComparisonData() {
+    const supplier1 = document.getElementById('supplier1').value;
+    const supplier2 = document.getElementById('supplier2').value;
+    const showAll = document.getElementById('showAll').checked;
+
+    if (!supplier1) {
+        alert('Пожалуйста, выберите хотя бы первого поставщика');
+        return;
+    }
+
+    // Показываем индикатор загрузки
+    document.getElementById('loadingSpinner').style.display = 'block';
+    document.getElementById('resultsCard').style.display = 'none';
+
+    const params = new URLSearchParams({
+        supplier1: supplier1,
+        supplier2: supplier2 || supplier1, // Если второй не выбран, используем первого
+        show_all: showAll
+    });
+
+    fetch('/api/supplier_comparison?' + params)
+        .then(response => response.json())
+        .then(data => {
+            comparisonData = data;
+            displayComparisonResults();
+            document.getElementById('loadingSpinner').style.display = 'none';
+            document.getElementById('resultsCard').style.display = 'block';
+            document.getElementById('filtersRow').style.display = 'flex';
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Ошибка при загрузке данных');
+            document.getElementById('loadingSpinner').style.display = 'none';
+        });
+}
+
+function displayComparisonResults() {
+    const tbody = document.getElementById('comparisonBody');
+    tbody.innerHTML = '';
+
+    // Обновляем заголовки
+    const supplier1Name = comparisonData[0]?.supplier1_name || 'Поставщик 1';
+    const supplier2Name = comparisonData[0]?.supplier2_name || 'Поставщик 2';
+    
+    document.getElementById('supplier1Header').textContent = supplier1Name;
+    document.getElementById('supplier2Header').textContent = supplier2Name;
+
+    // Заполняем таблицу
+    comparisonData.forEach(item => {
+        const row = document.createElement('tr');
+        row.className = 'comparison-row';
+        row.dataset.brand = item.brand || '';
+        row.dataset.article = item.main_article || '';
+        row.dataset.intersection = item.has_intersection ? 'intersection' : 'unique';
+
+        const priceDiff = item.price_diff_percent;
+        let diffClass = '';
+        let diffIcon = '';
+        
+        if (priceDiff !== null) {
+            if (priceDiff < 0) {
+                diffClass = 'text-success';
+                diffIcon = '<i class="bi bi-arrow-down"></i>';
+            } else if (priceDiff > 0) {
+                diffClass = 'text-danger';
+                diffIcon = '<i class="bi bi-arrow-up"></i>';
+            }
+        }
+
+        // Форматируем цену поставщика 1
+        const price1Display = item.price1_original ? 
+            `${item.price1_original.toFixed(2)} ${item.currency1}` : '-';
+        
+        const price1Rub = item.currency1 !== 'RUB' && item.price1_rub ? 
+            `<br><small class="text-muted">≈ ${item.price1_rub.toFixed(2)} руб.</small>` : '';
+
+        const date1Display = item.date1 ? 
+            `<br><small class="text-muted">${item.date1}</small>` : '';
+
+        // Форматируем цену поставщика 2
+        const price2Display = item.price2_original ? 
+            `${item.price2_original.toFixed(2)} ${item.currency2 || ''}` : '-';
+        
+        const price2Rub = item.currency2 && item.currency2 !== 'RUB' && item.price2_rub ? 
+            `<br><small class="text-muted">≈ ${item.price2_rub.toFixed(2)} руб.</small>` : '';
+
+        const date2Display = item.date2 ? 
+            `<br><small class="text-muted">${item.date2}</small>` : '';
+
+        row.innerHTML = `
+            <td class="brand">${item.brand || '-'}</td>
+            <td class="article">${item.main_article || '-'}</td>
+            <td>${item.name_ru || '-'}</td>
+            <td>
+                ${price1Display}
+                ${price1Rub}
+                ${date1Display}
+            </td>
+            <td>
+                ${price2Display}
+                ${price2Rub}
+                ${date2Display}
+            </td>
+            <td class="${diffClass}">
+                ${priceDiff !== null ? `${diffIcon} ${Math.abs(priceDiff)}%` : '-'}
+            </td>
+            <td>
+                <span class="badge bg-${item.has_intersection ? 'success' : 'warning'}">
+                    ${item.has_intersection ? 'Общая' : 'Уникальная'}
+                </span>
+            </td>
+        `;
+
+        tbody.appendChild(row);
+    });
+
+    updateStats();
+    populateBrandFilter();
+    filterComparisonTable();
+}
+
+
+function updateStats() {
+    const total = comparisonData.length;
+    const intersection = comparisonData.filter(item => item.has_intersection).length;
+    const unique = total - intersection;
+
+    document.getElementById('statsText').innerHTML = `
+        Всего деталей: <strong>${total}</strong> | 
+        Общих деталей: <strong>${intersection}</strong> | 
+        Уникальных деталей: <strong>${unique}</strong>
+    `;
+    document.getElementById('statsAlert').style.display = 'block';
+}
+
+function populateBrandFilter() {
+    const brandSelect = document.getElementById('brandFilter');
+    brandSelect.innerHTML = '<option value="">Все марки</option>';
+    
+    const brands = [...new Set(comparisonData.map(item => item.brand).filter(b => b))].sort();
+    brands.forEach(brand => {
+        const option = document.createElement('option');
+        option.value = brand;
+        option.textContent = brand;
+        brandSelect.appendChild(option);
+    });
+}
+
+function filterComparisonTable() {
+    const brandFilter = document.getElementById('brandFilter').value;
+    const articleFilter = document.getElementById('articleFilter').value.toLowerCase();
+    const intersectionFilter = document.getElementById('intersectionFilter').value;
+
+    const rows = document.querySelectorAll('.comparison-row');
+    let visibleCount = 0;
+
+    rows.forEach(row => {
+        const brand = row.dataset.brand || '';
+        const article = row.dataset.article || '';
+        const intersection = row.dataset.intersection;
+
+        const matchesBrand = !brandFilter || brand === brandFilter;
+        const matchesArticle = !articleFilter || article.toLowerCase().includes(articleFilter);
+        const matchesIntersection = intersectionFilter === 'all' || 
+                                  (intersectionFilter === 'intersection' && intersection === 'intersection') ||
+                                  (intersectionFilter === 'unique' && intersection === 'unique');
+
+        const isVisible = matchesBrand && matchesArticle && matchesIntersection;
+        row.style.display = isVisible ? '' : 'none';
+        if (isVisible) visibleCount++;
+    });
+
+    document.getElementById('resultsCount').textContent = `Показано ${visibleCount} записей`;
+}
+
+function clearComparisonFilters() {
+    document.getElementById('brandFilter').value = '';
+    document.getElementById('articleFilter').value = '';
+    document.getElementById('intersectionFilter').value = 'all';
+    filterComparisonTable();
+}
+
+function exportComparisonToExcel() {
+    const table = document.getElementById('comparisonTable');
+    const wb = XLSX.utils.table_to_book(table, {sheet: "Сравнение поставщиков"});
+    XLSX.writeFile(wb, "сравнение_поставщиков.xlsx");
+}
+
+// Навешиваем обработчики на фильтры
+document.getElementById('brandFilter').addEventListener('change', filterComparisonTable);
+document.getElementById('articleFilter').addEventListener('input', filterComparisonTable);
+document.getElementById('intersectionFilter').addEventListener('change', filterComparisonTable);
+</script>
+
+<style>
+.comparison-row td {
+    vertical-align: middle;
+}
+.text-success {
+    color: #198754 !important;
+    font-weight: bold;
+}
+.text-danger {
+    color: #dc3545 !important;
+    font-weight: bold;
+}
+.badge.bg-success {
+    background-color: #198754 !important;
+}
+.badge.bg-warning {
+    background-color: #ffc107 !important;
+    color: #000 !important;
+}
+</style>
+{% endblock %}

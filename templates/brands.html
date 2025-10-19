@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-tag"></i> Управление брендами и синонимами</h2>
+    <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Назад
+    </a>
+</div>
+
+<div class="row">
+    <!-- Левая колонка - добавление бренда и синонима -->
+    <div class="col-lg-5">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>Добавить бренд</h5>
+            </div>
+            <div class="card-body">
+                <form id="addBrandForm">
+                    <div class="mb-3">
+                        <label class="form-label">Название бренда *</label>
+                        <input type="text" class="form-control" id="brandName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Страна</label>
+                        <input type="text" class="form-control" id="brandCountry">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Описание</label>
+                        <textarea class="form-control" id="brandDescription" rows="2"></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-plus-circle"></i> Добавить бренд
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h5>Добавить синоним</h5>
+            </div>
+            <div class="card-body">
+                <form id="addSynonymForm">
+                    <div class="mb-3">
+                        <label class="form-label">Основной бренд *</label>
+                        <select class="form-select" id="synonymBrand" required>
+                            <option value="">-- Выберите бренд --</option>
+                            {% for brand in brands %}
+                            <option value="{{ brand.id }}">{{ brand.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Синоним *</label>
+                        <input type="text" class="form-control" id="synonymName" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-link"></i> Добавить синоним
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Правая колонка - список брендов и синонимов -->
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header">
+                <h5>Список брендов и синонимов</h5>
+            </div>
+            <div class="card-body">
+                {% if brands %}
+                <div class="accordion" id="brandsAccordion">
+                    {% for brand in brands %}
+                    <div class="accordion-item">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button collapsed" type="button" 
+                                    data-bs-toggle="collapse" data-bs-target="#brand{{ brand.id }}">
+                                <strong>{{ brand.name }}</strong>
+                                {% if brand.country %}({{ brand.country }}){% endif %}
+                            </button>
+                        </h2>
+                        <div id="brand{{ brand.id }}" class="accordion-collapse collapse" 
+                             data-bs-parent="#brandsAccordion">
+                            <div class="accordion-body">
+                                <p>{{ brand.description or 'Нет описания' }}</p>
+                                <h6>Синонимы:</h6>
+                                <div id="synonyms{{ brand.id }}">
+                                    <div class="text-muted">Загрузка синонимов...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-muted">Нет добавленных брендов</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Загрузка синонимов для бренда
+function loadSynonyms(brandId) {
+    fetch('/api/brand_synonyms')
+        .then(response => response.json())
+        .then(synonyms => {
+            const brandSynonyms = synonyms.filter(s => s.brand_id == brandId);
+            const container = document.getElementById(`synonyms${brandId}`);
+            
+            if (brandSynonyms.length === 0) {
+                container.innerHTML = '<div class="text-muted">Нет синонимов</div>';
+                return;
+            }
+            
+            container.innerHTML = brandSynonyms.map(synonym => `
+                <div class="d-flex justify-content-between align-items-center mb-2 p-2 border rounded">
+                    <span>${synonym.synonym_name}</span>
+                    <button class="btn btn-sm btn-danger" onclick="deleteSynonym(${synonym.id})">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+            `).join('');
+        })
+        .catch(error => {
+            console.error('Error loading synonyms:', error);
+            document.getElementById(`synonyms${brandId}`).innerHTML = 
+                '<div class="text-danger">Ошибка загрузки</div>';
+        });
+}
+
+// Удаление синонима
+function deleteSynonym(synonymId) {
+    if (!confirm('Удалить этот синоним?')) return;
+    
+    fetch(`/api/brand_synonyms?id=${synonymId}`, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Перезагружаем все аккордеоны
+            document.querySelectorAll('.accordion-item').forEach(item => {
+                const brandId = item.querySelector('.accordion-button').dataset.bsTarget.replace('#brand', '');
+                loadSynonyms(brandId);
+            });
+        } else {
+            alert('Ошибка при удалении: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    })
+    .catch(error => {
+        console.error('Error deleting synonym:', error);
+        alert('Ошибка при удалении');
+    });
+}
+
+// Добавление бренда
+document.getElementById('addBrandForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const brandData = {
+        name: document.getElementById('brandName').value,
+        country: document.getElementById('brandCountry').value,
+        description: document.getElementById('brandDescription').value
+    };
+
+    fetch('/api/brands', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(brandData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Бренд успешно добавлен!');
+            document.getElementById('addBrandForm').reset();
+            location.reload();
+        } else {
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    })
+    .catch(error => {
+        console.error('Error adding brand:', error);
+        alert('Ошибка при добавлении бренда');
+    });
+});
+
+// Добавление синонима
+document.getElementById('addSynonymForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const synonymData = {
+        brand_id: document.getElementById('synonymBrand').value,
+        synonym_name: document.getElementById('synonymName').value
+    };
+
+    if (!synonymData.brand_id) {
+        alert('Выберите бренд');
+        return;
+    }
+
+    fetch('/api/brand_synonyms', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(synonymData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Синоним успешно добавлен!');
+            document.getElementById('addSynonymForm').reset();
+            // Обновляем список синонимов для выбранного бренда
+            loadSynonyms(synonymData.brand_id);
+        } else {
+            alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    })
+    .catch(error => {
+        console.error('Error adding synonym:', error);
+        alert('Ошибка при добавлении синонима');
+    });
+});
+
+// Загружаем синонимы при открытии аккордеона
+document.addEventListener('DOMContentLoaded', function() {
+    const accordion = document.getElementById('brandsAccordion');
+    
+    // Слушаем события открытия аккордеона
+    accordion.addEventListener('show.bs.collapse', function(event) {
+        const target = event.target;
+        const brandId = target.id.replace('brand', '');
+        loadSynonyms(brandId);
+    });
+
+    // Также загружаем синонимы для уже открытых элементов
+    const openItems = document.querySelectorAll('.accordion-collapse.show');
+    openItems.forEach(item => {
+        const brandId = item.id.replace('brand', '');
+        loadSynonyms(brandId);
+    });
+});
+
+// Функция для отладки - проверяем доступность API
+function checkApi() {
+    fetch('/api/brand_synonyms')
+        .then(response => {
+            console.log('API status:', response.status);
+            return response.json();
+        })
+        .then(data => console.log('API response:', data))
+        .catch(error => console.error('API error:', error));
+}
+
+// Для отладки можно раскомментировать:
+// checkApi();
+</script>
+{% endblock %}
+

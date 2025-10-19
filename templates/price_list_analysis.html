@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Обновляем заголовок -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2><i class="bi bi-graph-up"></i> Анализ прайс-листа ({{ stats.region_name }})</h2>
+        <p class="text-muted mb-0">
+            {{ price_list.supplier_name }} • {{ price_list.upload_date }} • 
+            {{ price_list.file_name }}
+        </p>
+        {% if price_list.description %}
+        <p class="text-muted"><small>{{ price_list.description }}</small></p>
+        {% endif %}
+    </div>
+    <a href="{{ url_for('manage_price_lists') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Назад к прайс-листам
+    </a>
+</div>
+
+<!-- Обновляем статистику -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">{{ stats.total_items }}</h5>
+                <p class="card-text">Всего позиций</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-center border-success">
+            <div class="card-body">
+                <h5 class="card-title text-success">{{ stats.price_decreased }}</h5>
+                <p class="card-text">Цена снизилась</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-center border-warning">
+            <div class="card-body">
+                <h5 class="card-title text-warning">{{ stats.price_increased }}</h5>
+                <p class="card-text">Цена выросла</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-center border-success">
+            <div class="card-body">
+                <h5 class="card-title text-success">{{ stats.better_than_regional }}</h5>
+                <p class="card-text">Лучше по региону</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center border-warning">
+            <div class="card-body">
+                <h5 class="card-title text-warning">{{ stats.worse_than_regional }}</h5>
+                <p class="card-text">Хуже по региону</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+
+<!-- Фильтры -->
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row g-2">
+            <div class="col-md-3">
+                <select class="form-select" id="changeFilter">
+                    <option value="all">Все изменения</option>
+                    <option value="increased">Цена выросла</option>
+                    <option value="decreased">Цена снизилась</option>
+                    <option value="no_previous">Нет предыдущей цены</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <select class="form-select" id="marketFilter">
+                    <option value="all">Все позиции</option>
+                    <option value="better">Лучше рынка</option>
+                    <option value="worse">Хуже рынка</option>
+                    <option value="no_market">Нет данных по рынку</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <input type="text" class="form-control" id="searchFilter" placeholder="Поиск по артикулу...">
+            </div>
+            <div class="col-md-3">
+                <button class="btn btn-outline-secondary w-100" onclick="clearFilters()">
+                    <i class="bi bi-x-circle"></i> Сбросить
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Обновляем таблицу -->
+<div class="table-responsive">
+    <table class="table table-striped" id="analysisTable">
+        <thead>
+            <tr>
+                <th>Марка</th>
+                <th>Артикул</th>
+                <th>Название</th>
+                <th>Текущая цена</th>
+                <th>Предыдущая цена</th>
+                <th>Изменение</th>
+                <th>Лучшая в регионе</th>
+                <th>Поставщик</th>
+                <th>Разница с регионом</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in analysis_data %}
+            <tr class="analysis-row">
+                <td>{{ item.brand }}</td>
+                <td>{{ item.main_article }}</td>
+                <td>{{ item.name_ru or '-' }}</td>
+                <td class="fw-bold">
+                    {{ "%.2f"|format(item.current_price) }} {{ item.supplier_currency }}
+                    {% if item.supplier_currency != 'RUB' %}
+                    {% set current_rub = item.current_price * (currency_rates[item.supplier_currency] if item.supplier_currency in currency_rates else 1) %}
+                    <br><small class="text-muted">≈ {{ "%.2f"|format(current_rub) }} руб.</small>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if item.previous_price %}
+                    {{ "%.2f"|format(item.previous_price) }} {{ item.supplier_currency }}
+                    <br><small class="text-muted">{{ item.previous_date }}</small>
+                    {% else %}
+                    <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if item.change_vs_previous_percent %}
+                        {% if item.change_vs_previous_percent > 0 %}
+                        <span class="text-danger">
+                            <i class="bi bi-arrow-up"></i> +{{ item.change_vs_previous_percent }}%
+                        </span>
+                        {% else %}
+                        <span class="text-success">
+                            <i class="bi bi-arrow-down"></i> {{ item.change_vs_previous_percent }}%
+                        </span>
+                        {% endif %}
+                    {% else %}
+                        <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if item.best_regional_price_original %}
+                    {{ "%.2f"|format(item.best_regional_price_original) }} {{ item.best_regional_currency }}
+                    <br><small class="text-muted">≈ {{ "%.2f"|format(item.best_regional_price_rub) }} руб.</small>
+                    {% else %}
+                    <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if item.best_regional_supplier %}
+                    <small>{{ item.best_regional_supplier }}</small>
+                    {% else %}
+                    <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if item.change_vs_regional_percent %}
+                        {% if item.change_vs_regional_percent > 0 %}
+                        <span class="text-danger">
+                            <i class="bi bi-arrow-up"></i> +{{ item.change_vs_regional_percent }}%
+                        </span>
+                        {% else %}
+                        <span class="text-success">
+                            <i class="bi bi-arrow-down"></i> {{ item.change_vs_regional_percent }}%
+                        </span>
+                        {% endif %}
+                    {% else %}
+                        <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function clearFilters() {
+    document.getElementById('changeFilter').value = 'all';
+    document.getElementById('marketFilter').value = 'all';
+    document.getElementById('searchFilter').value = '';
+    filterTable();
+}
+
+function filterTable() {
+    const changeFilter = document.getElementById('changeFilter').value;
+    const marketFilter = document.getElementById('marketFilter').value;
+    const searchFilter = document.getElementById('searchFilter').value.toLowerCase();
+    
+    const rows = document.querySelectorAll('.analysis-row');
+    
+    rows.forEach(row => {
+        const changeCell = row.cells[5];
+        const marketCell = row.cells[8];
+        const article = row.cells[1].textContent.toLowerCase();
+        
+        const hasIncrease = changeCell.textContent.includes('+');
+        const hasDecrease = changeCell.textContent.includes('-') && !changeCell.textContent.includes('+');
+        const hasNoPrevious = changeCell.textContent.includes('—');
+        
+        const hasBetterMarket = marketCell.textContent.includes('-') && !marketCell.textContent.includes('+');
+        const hasWorseMarket = marketCell.textContent.includes('+');
+        const hasNoMarket = marketCell.textContent.includes('—');
+        
+        const matchesChange = 
+            changeFilter === 'all' ||
+            (changeFilter === 'increased' && hasIncrease) ||
+            (changeFilter === 'decreased' && hasDecrease) ||
+            (changeFilter === 'no_previous' && hasNoPrevious);
+            
+        const matchesMarket = 
+            marketFilter === 'all' ||
+            (marketFilter === 'better' && hasBetterMarket) ||
+            (marketFilter === 'worse' && hasWorseMarket) ||
+            (marketFilter === 'no_market' && hasNoMarket);
+            
+        const matchesSearch = !searchFilter || article.includes(searchFilter);
+        
+        row.style.display = (matchesChange && matchesMarket && matchesSearch) ? '' : 'none';
+    });
+}
+
+document.getElementById('changeFilter').addEventListener('change', filterTable);
+document.getElementById('marketFilter').addEventListener('change', filterTable);
+document.getElementById('searchFilter').addEventListener('input', filterTable);
+
+// Применяем фильтры при загрузке
+document.addEventListener('DOMContentLoaded', filterTable);
+</script>
+
+<style>
+.analysis-row td {
+    vertical-align: middle;
+}
+.text-success {
+    color: #198754 !important;
+    font-weight: bold;
+}
+.text-danger {
+    color: #dc3545 !important;
+    font-weight: bold;
+}
+</style>
+{% endblock %}

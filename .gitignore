@@ -1,0 +1,20 @@
+# Базы данных
+*.db
+*.sqlite3
+
+# Загруженные файлы
+uploads/
+tmp/
+!bk/
+
+# Логи
+*.log
+
+# Питон
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/

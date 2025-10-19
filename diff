@@ -1,0 +1,588 @@
+�ࠢ����� 䠩��� qw1-app.py � APP.PY
+***** qw1-app.py
+# ================== СТАТИСТИКА ПРОДАЖ ==================
+
+@app.route('/sales_statistics')
+***** APP.PY
+# ================== СТАТИСТИКА ПРОДАЖ ==================
+@app.route('/sales_statistics')
+*****
+
+***** qw1-app.py
+def api_sales_statistics():
+    """API для получения статистики продаж"""
+    data_type = request.args.get('data_type', 'all')
+    volume_group = request.args.get('volume_group', 'all')  # ← ДОБАВИЛИ
+    search = request.args.get('search', '')
+    conn = get_db_connection()
+    
+    query = '''
+***** APP.PY
+def api_sales_statistics():
+    """API для получения статистики продаж с фильтрацией"""
+    data_type = request.args.get('data_type', 'all')
+    volume_group = request.args.get('volume_group', 'all')
+    search = request.args.get('search', '') # Поиск по артикулу или бренду
+    conn = get_db_connection()
+    # ИЗМЕНЕНО: JOIN с parts_catalog и brands через part_id
+    query = '''
+*****
+
+***** qw1-app.py
+        ss.*,
+        b.name as brand_name,
+        CASE 
+***** APP.PY
+        ss.*,
+        pc.main_article, -- <-- Берем артикул из parts_catalog
+        b.name as brand_name, -- <-- Берем бренд из brands через parts_catalog
+        CASE 
+*****
+
+***** qw1-app.py
+    FROM sales_statistics ss
+    JOIN brands b ON ss.brand_id = b.id
+    WHERE 1=1
+***** APP.PY
+    FROM sales_statistics ss
+    JOIN parts_catalog pc ON ss.part_id = pc.id -- <-- JOIN через part_id
+    JOIN brands b ON pc.brand_id = b.id -- <-- JOIN через brand_id в parts_catalog
+    WHERE 1=1
+*****
+
+***** qw1-app.py
+    '''
+    
+    params = []
+    
+    if data_type != 'all':
+***** APP.PY
+    '''
+    params = []
+    if data_type != 'all':
+*****
+
+***** qw1-app.py
+        params.append(data_type)
+    
+    # ДОБАВЛЯЕМ ФИЛЬТР ПО ГРУППЕ ОБЪЕМА
+    if volume_group != 'all':
+***** APP.PY
+        params.append(data_type)
+    if volume_group != 'all':
+*****
+
+***** qw1-app.py
+        params.append(volume_group)
+    
+    if search:
+        query += ' AND (ss.main_article LIKE ? OR b.name LIKE ?)'
+        search_term = f'%{search}%'
+***** APP.PY
+        params.append(volume_group)
+    if search:
+        # ИЗМЕНЕНО: Поиск теперь по pc.main_article и b.name
+        query += ' AND (pc.main_article LIKE ? OR b.name LIKE ?)'
+        search_term = f'%{search}%'
+*****
+
+***** qw1-app.py
+        params.extend([search_term, search_term])
+    
+    query += ' ORDER BY ss.period DESC, b.name, ss.main_article'
+    
+    stats = conn.execute(query, params).fetchall()
+***** APP.PY
+        params.extend([search_term, search_term])
+    query += ' ORDER BY ss.period DESC, b.name, pc.main_article'
+    stats = conn.execute(query, params).fetchall()
+*****
+
+***** qw1-app.py
+    conn.close()
+    
+    return jsonify([dict(stat) for stat in stats])
+    
+@app.route('/api/sales_statistics/upload', methods=['POST'])
+***** APP.PY
+    conn.close()
+    return jsonify([dict(stat) for stat in stats])
+
+@app.route('/api/sales_statistics/upload', methods=['POST'])
+*****
+
+***** qw1-app.py
+        return jsonify({'error': 'No file selected'}), 400
+    data_type = request.form.get('data_type', 'own_sales')
+    if file and file.filename.endswith(('.xlsx', '.xls')):
+***** APP.PY
+        return jsonify({'error': 'No file selected'}), 400
+
+    # Определяем тип данных из формы
+    data_type = request.form.get('data_type', 'own_sales')
+    if data_type not in ['own_sales', 'competitor_sales', 'analytics_center']:
+        return jsonify({'error': 'Invalid data_type provided'}), 400
+
+    if file and file.filename.endswith(('.xlsx', '.xls')):
+*****
+
+***** qw1-app.py
+                col_lower = str(col).lower()
+                if 'артикул' in col_lower: 
+                    column_mapping[col] = 'article'
+                elif 'марка' in col_lower: 
+                    column_mapping[col] = 'brand'
+                elif 'период' in col_lower or 'дата' in col_lower: 
+                    column_mapping[col] = 'period'
+                elif 'количество' in col_lower or 'продажи' in col_lower or 'шт' in col_lower: 
+                    column_mapping[col] = 'quantity'
+                elif 'группа' in col_lower: 
+                    column_mapping[col] = 'volume_group'
+                elif 'запрос' in col_lower: 
+                    column_mapping[col] = 'requests'
+                elif 'источник' in col_lower: 
+                    column_mapping[col] = 'source'
+                elif 'примеч' in col_lower: 
+                    column_mapping[col] = 'notes'
+            df = df.rename(columns=column_mapping)
+            # Очистка данных
+            if 'article' in df.columns:
+                df['article'] = df['article'].apply(normalize_article)
+            if 'brand' in df.columns:
+                df['brand'] = df['brand'].fillna('').astype(str).str.strip()
+            # Валидация обязательных полей
+            required_fields = ['article', 'brand', 'period']
+            missing_fields = [field for field in required_fields if field not in df.columns]
+***** APP.PY
+                col_lower = str(col).lower()
+                if 'артикул' in col_lower:
+                    column_mapping[col] = 'article'
+                elif 'марка' in col_lower:
+                    column_mapping[col] = 'brand'
+                elif 'период' in col_lower or 'дата' in col_lower:
+                    column_mapping[col] = 'period'
+                elif 'количество' in col_lower or 'продажи' in col_lower or 'шт' in col_lower:
+                    column_mapping[col] = 'quantity'
+                elif 'группа' in col_lower:
+                    column_mapping[col] = 'volume_group'
+                elif 'запрос' in col_lower:
+                    column_mapping[col] = 'requests'
+                elif 'источник' in col_lower:
+                    column_mapping[col] = 'source'
+                elif 'примеч' in col_lower:
+                    column_mapping[col] = 'notes'
+
+            df = df.rename(columns=column_mapping)
+
+            # Валидация обязательных полей для каждого типа
+            required_fields = ['article', 'brand'] # Обязательны всегда
+            if data_type in ['own_sales', 'competitor_sales']:
+                required_fields.extend(['quantity', 'period']) # Требуются для продаж
+            if data_type == 'analytics_center':
+                required_fields.extend(['volume_group']) # Требуется для аналитики
+
+            missing_fields = [field for field in required_fields if field not in df.columns]
+*****
+
+***** qw1-app.py
+ields)}'}), 400
+            df = df.dropna(subset=['article', 'brand', 'period'])
+            conn = get_db_connection()
+***** APP.PY
+ields)}'}), 400
+
+            # Очистка данных
+            if 'article' in df.columns:
+                df['article'] = df['article'].apply(normalize_article)
+            if 'brand' in df.columns:
+                df['brand'] = df['brand'].fillna('').astype(str).str.strip()
+
+            df = df.dropna(subset=required_fields)
+
+            conn = get_db_connection()
+*****
+
+***** qw1-app.py
+            new_brands = set()
+            for _, row in df.iterrows():
+***** APP.PY
+            new_brands = set()
+            new_articles = set()
+
+            for _, row in df.iterrows():
+*****
+
+***** qw1-app.py
+                notes = row.get('notes', '')
+                if not article or not brand_name:
+***** APP.PY
+                notes = row.get('notes', '')
+
+                if not article or not brand_name:
+*****
+
+***** qw1-app.py
+                    continue
+                # Преобразуем период в дату
+                try:
+                    if isinstance(period, str):
+                        period_date = datetime.strptime(period, '%Y-%m-%d').date()
+                    else:
+                        period_date = period.date() if hasattr(period, 'date') else datetime.now().date()
+                except:
+                    period_date = datetime.now().date()
+
+***** APP.PY
+                    continue
+
+*****
+
+***** qw1-app.py
+                if not brand_id:
+                    # Если get_or_create_brand не возвращает ID, что-то пошло не так
+                    print(f"Ошибка: Не удалось получить или создать бренд для '{brand_
+***** APP.PY
+                if not brand_id:
+                    print(f"Ошибка: Не удалось получить или создать бренд для '{brand_
+*****
+
+***** qw1-app.py
+
+                # Нормализуем группу объема
+***** APP.PY
+
+                # Преобразуем период в дату (год-месяц)
+                period_date = None
+                if period:
+                    try:
+                        if isinstance(period, str):
+                            # Пытаемся распарсить как YYYY-MM или YYYY-MM-DD
+                            period_date = datetime.strptime(period, '%Y-%m').date()
+                        elif hasattr(period, 'date'):
+                            # Если это pandas datetime, конвертируем
+                            period_date = period.date().replace(day=1) # Устанавливаем день на 1 для ме
+сяца
+                        else:
+                            # Если число, предполагаем год
+                            year = int(period)
+                            period_date = datetime(year, 1, 1).date()
+                    except ValueError:
+                        # Если не получилось, используем текущий месяц
+                        period_date = datetime.now().date().replace(day=1)
+
+                # --- ИСПРАВЛЕНО: Находим part_id вместо отдельного brand_id и article ---
+                # Ищем деталь в parts_catalog
+                existing_part = conn.execute('''
+                    SELECT id FROM parts_catalog
+                    WHERE brand_id = ? AND (main_article = ? OR additional_article = ?)
+                ''', (brand_id, article, article)).fetchone()
+
+                if existing_part:
+                    part_id = existing_part['id']
+                else:
+                    # Если артикул не найден, добавляем в parts_catalog
+                    cursor = conn.execute(
+                        'INSERT INTO parts_catalog (brand_id, main_article) VALUES (?, ?)',
+                        (brand_id, article)
+                    )
+                    part_id = cursor.lastrowid
+                    new_articles.add(f"{brand_name}-{article}")
+                # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
+
+                # Нормализуем группу объема
+*****
+
+***** qw1-app.py
+                        volume_group_normalized = 'no_demand'
+                # Проверяем существование записи
+                existing = conn.execute('''
+                    SELECT id FROM sales_statistics 
+                    WHERE brand_id = ? AND main_article = ? AND data_type = ? AND period = ?
+                ''', (brand_id, article, data_type, period_date)).fetchone()
+                if existing:
+***** APP.PY
+                        volume_group_normalized = 'no_demand'
+
+                # Проверяем существование записи по part_id, data_type и period
+                existing = conn.execute('''
+                    SELECT id FROM sales_statistics
+                    WHERE part_id = ? AND data_type = ? AND period = ?
+                ''', (part_id, data_type, period_date)).fetchone()
+
+
+                if existing:
+*****
+
+***** qw1-app.py
+                    conn.execute('''
+                        UPDATE sales_statistics 
+                        SET quantity = ?, volume_group = ?, requests_per_month = ?, source_name = ?, notes = ?, updated_at = CU
+***** APP.PY
+                    conn.execute('''
+                        UPDATE sales_statistics
+                        SET quantity = ?, volume_group = ?, requests_per_month = ?, source_name = ?, notes = ?, updated_at = CU
+*****
+
+***** qw1-app.py
+                else:
+                    # Добавляем новую запись
+                    conn.execute('''
+                        INSERT INTO sales_statistics 
+                        (brand_id, main_article, data_type, period, quantity, volume_group, requests_per_month, source_name, no
+tes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (brand_id, article, data_type, period_date, quantity, volume_group_normalized, requests, source, notes
+))
+                    added_count += 1
+            conn.commit()
+***** APP.PY
+                else:
+                    # Добавляем новую запись с part_id
+                    conn.execute('''
+                        INSERT INTO sales_statistics
+                        (part_id, data_type, period, quantity, volume_group, requests_per_month, source_name, notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (part_id, data_type, period_date, quantity, volume_group_normalized, requests, source, notes))
+                    added_count += 1
+
+            conn.commit()
+*****
+
+***** qw1-app.py
+            conn.close()
+            return jsonify({
+***** APP.PY
+            conn.close()
+
+            return jsonify({
+*****
+
+***** qw1-app.py
+                'total': len(df),
+                'new_brands': list(new_brands)
+            })
+        except Exception as e:
+***** APP.PY
+                'total': len(df),
+                'new_brands': list(new_brands),
+                'new_articles': list(new_articles) # Возвращаем список новых артикулов
+            })
+
+        except Exception as e:
+*****
+
+***** qw1-app.py
+            return jsonify({'error': f'Ошибка обработки файла: {str(e)}'}), 500
+    return jsonify({'error': 'Invalid file format'}), 400    
+
+
+***** APP.PY
+            return jsonify({'error': f'Ошибка обработки файла: {str(e)}'}), 500
+
+    return jsonify({'error': 'Invalid file format'}), 400
+
+*****
+
+***** qw1-app.py
+    conn = get_db_connection()
+    
+    if request.method == 'PUT':
+***** APP.PY
+    conn = get_db_connection()
+    if request.method == 'PUT':
+*****
+
+***** qw1-app.py
+        data = request.get_json()
+        
+        # Находим ID бренда по имени
+        brand = conn.execute(
+***** APP.PY
+        data = request.get_json()
+        # --- ИСПРАВЛЕНО: Находим part_id по brand и article ---
+        # Сначала находим brand_id
+        brand = conn.execute(
+*****
+
+***** qw1-app.py
+        ).fetchone()
+        
+        if not brand:
+***** APP.PY
+        ).fetchone()
+        if not brand:
+*****
+
+***** qw1-app.py
+            return jsonify({'error': 'Бренд не найден'}), 400
+        
+        # Обновляем статистику
+***** APP.PY
+            return jsonify({'error': 'Бренд не найден'}), 400
+        brand_id = brand['id']
+
+        # Затем находим part_id в parts_catalog
+        article = data.get('main_article', '')
+        part = conn.execute(
+            'SELECT id FROM parts_catalog WHERE brand_id = ? AND (main_article = ? OR additional_article = ?)',
+            (brand_id, article, article)
+        ).fetchone()
+        if not part:
+            conn.close()
+            return jsonify({'error': 'Деталь не найдена в каталоге'}), 400
+        part_id = part['id']
+        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
+        # Обновляем статистику
+*****
+
+***** qw1-app.py
+        conn.execute('''
+            UPDATE sales_statistics 
+            SET brand_id = ?, main_article = ?, data_type = ?, period = ?, 
+                quantity = ?, volume_group = ?, requests_per_month = ?, 
+                source_name = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+***** APP.PY
+        conn.execute('''
+            UPDATE sales_statistics
+            SET part_id = ?, data_type = ?, period = ?,
+                quantity = ?, volume_group = ?, requests_per_month = ?,
+                source_name = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+*****
+
+***** qw1-app.py
+        ''', (
+            brand['id'],
+            data.get('main_article', ''),
+            data.get('data_type', 'own_sales'),
+***** APP.PY
+        ''', (
+            part_id, # <-- Теперь передаем part_id
+            data.get('data_type', 'own_sales'),
+*****
+
+***** qw1-app.py
+        ))
+        
+        conn.commit()
+***** APP.PY
+        ))
+        conn.commit()
+*****
+
+***** qw1-app.py
+        return jsonify({'success': True})
+    
+    elif request.method == 'DELETE':
+***** APP.PY
+        return jsonify({'success': True})
+
+    elif request.method == 'DELETE':
+*****
+
+***** qw1-app.py
+
+@app.route('/api/sales_statistics/aggregated')
+def api_sales_statistics_aggregated():
+    """API для агрегированной статистики по деталям"""
+    conn = get_db_connection()
+***** APP.PY
+
+# ================== /СТАТИСТИКА ПРОДАЖ ==================
+
+    
+# ================== КАТАЛОГ ==================
+@app.route('/catalog')
+def catalog_management():
+    """Главная страница управления каталогом"""
+    conn = get_db_connection()
+*****
+
+***** qw1-app.py
+    
+    query = '''
+    WITH LatestStats AS (
+        SELECT 
+            ss.brand_id,
+            ss.main_article,
+            ss.data_type,
+            ss.quantity,
+            ss.volume_group,
+            ss.requests_per_month,
+            ss.period,
+            ROW_NUMBER() OVER (PARTITION BY ss.brand_id, ss.main_article, ss.data_type ORDER BY ss.period DESC) as rn
+        FROM sales_statistics ss
+    )
+    SELECT 
+        b.name as brand_name,
+        ls.main_article,
+        ls.data_type,
+        ls.quantity,
+        ls.volume_group,
+        ls.requests_per_month,
+        ls.period
+    FROM LatestStats ls
+    JOIN brands b ON ls.brand_id = b.id
+    WHERE ls.rn = 1
+    ORDER BY b.name, ls.main_article, ls.data_type
+    '''
+    
+    stats = conn.execute(query).fetchall()
+    conn.close()
+    
+    return jsonify([dict(stat) for stat in stats])
+
+    
+# ================== КАТАЛОГ ==================
+@app.route('/catalog')
+def catalog_management():
+    """Главная страница управления каталогом"""
+    conn = get_db_connection()
+***** APP.PY
+    
+    # Получаем список брендов для фильтра
+    brands = conn.execute(
+        'SELECT * FROM brands ORDER BY name'
+    ).fetchall()
+    
+    conn.close()
+    return render_template('catalog.html', brands=brands)
+
+@app.route('/api/catalog')
+def api_catalog():
+    """API для получения данных каталога с фильтрацией"""
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 50, type=int)
+    brand_filter = request.args.get('brand', '')
+    article_filter = request.args.get('article', '')
+    
+    conn = get_db_connection()
+*****
+
+***** qw1-app.py
+    
+    # Получаем список брендов для фильтра
+    brands = conn.execute(
+        'SELECT * FROM brands ORDER BY name'
+    ).fetchall()
+    
+    conn.close()
+    return render_template('catalog.html', brands=brands)
+
+@app.route('/api/catalog')
+def api_catalog():
+    """API для получения данных каталога с фильтрацией"""
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 50, type=int)
+    brand_filter = request.args.get('brand', '')
+    article_filter = request.args.get('article', '')
+    
+    conn = get_db_connection()
+    
+    # Базовый запрос
+***** APP.PY
+    
+    # Базовый запрос
+*****
+
