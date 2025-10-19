@@ -8,41 +8,64 @@
                 <h4><i class="bi bi-upload"></i> Загрузка прайс-листа</h4>
             </div>
             <div class="card-body">
-                <form method="POST" action="{{ url_for('upload_file') }}" enctype="multipart/form-data" id="uploadForm">
-                    <div class="row g-3">
-                        <div class="col-md-6">
-                            <label class="form-label">Поставщик *</label>
-                            <select class="form-select" id="supplier_select" name="supplier_id" required>
-                                <option value="">-- Выберите поставщика --</option>
-                            </select>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Дата прайс-листа *</label>
-                            <input type="date" class="form-control" name="upload_date" required>
-                        </div>
-                        <div class="col-12">
-                            <label class="form-label">Описание прайс-листа</label>
-                            <textarea class="form-control" name="description" rows="2" 
-                                      placeholder="Например: 'Осенние цены со скидкой 10%', 'Прайс от 01.11.2024 с новыми позициями'"></textarea>
-                            <div class="form-text">
-                                Необязательное поле. Поможет позже вспомнить особенности этого прайс-листа.
-                            </div>
-                        </div>
-                        <div class="col-12">
-                            <label class="form-label">Файл Excel *</label>
-                            <input type="file" class="form-control" name="file" 
-                                   accept=".xlsx,.xls" required>
-                            <div class="form-text">
-                                Поддерживаемые форматы: .xlsx, .xls. Файл должен содержать колонки: 
-                                Артикул, Марка, Название, Цена
-                            </div>
-                        </div>
-                    </div>
-                    <button type="submit" class="btn btn-primary mt-3">
-                        <i class="bi bi-upload"></i> Загрузить
+<!-- В форме загрузки прайс-листа -->
+<form method="POST" action="{{ url_for('upload_file') }}" enctype="multipart/form-data" id="uploadForm">
+    <div class="row g-3">
+        <div class="col-md-6">
+            <label class="form-label">Поставщик *</label>
+            <select class="form-select" id="supplier_select" name="supplier_id" required>
+                <option value="">-- Выберите поставщика --</option>
+            </select>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Дата прайс-листа *</label>
+            <input type="date" class="form-control" name="upload_date" required>
+        </div>
+        <div class="col-12">
+            <label class="form-label">Описание прайс-листа</label>
+            <textarea class="form-control" name="description" rows="2" 
+                      placeholder="Например: 'Осенние цены со скидкой 10%', 'Прайс от 01.11.2024 с новыми позициями'"></textarea>
+            <div class="form-text">
+                Необязательное поле. Поможет позже вспомнить особенности этого прайс-листа.
+            </div>
+        </div>
+        <div class="col-12">
+            <label class="form-label">Файл Excel *</label>
+            <input type="file" class="form-control" id="priceFile" name="file" 
+                   accept=".xlsx,.xls" required>
+            <div class="form-text">
+                Поддерживаемые форматы: .xlsx, .xls. Файл должен содержать колонки: 
+                Артикул, Марка, Название, Цена
+            </div>
+        </div>
+        
+        <!-- КНОПКИ ПРОВЕРКИ И ЗАГРУЗКИ -->
+        <div class="col-12">
+            <div class="row g-2">
+                <div class="col-md-4">
+                    <button type="button" class="btn btn-outline-primary w-100" id="validatePriceBtn">
+                        <i class="bi bi-search"></i> Проверить прайс-лист
                     </button>
-                </form>
-                
+                </div>
+                <div class="col-md-4">
+                    <button type="submit" class="btn btn-success w-100">
+                        <i class="bi bi-upload"></i> Загрузить прайс-лист
+                    </button>
+                </div>
+                <div class="col-md-4">
+                    <button type="button" class="btn btn-outline-secondary w-100" onclick="clearPriceValidation()">
+                        <i class="bi bi-x-circle"></i> Очистить проверку
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+<!-- Блок для отображения результатов проверки -->
+<div id="priceValidationResult" class="mt-3" style="display: none;"></div>                
+
+
                 <!-- Блок для отображения результатов загрузки каталога -->
                 <div id="uploadResult" class="mt-3" style="display: none;"></div>
             </div>
@@ -77,8 +100,9 @@
 
 {% block scripts %}
 <script>
-// Загрузка списка поставщиков
+// Инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', function() {
+    // Загрузка поставщиков (существующий код)
     fetch('/api/suppliers')
         .then(response => response.json())
         .then(suppliers => {
@@ -90,7 +114,161 @@ document.addEventListener('DOMContentLoaded', function() {
                 select.appendChild(option);
             });
         });
+    
+    // Обработчик кнопки проверки прайс-листа
+    document.getElementById('validatePriceBtn').addEventListener('click', validatePriceList);
 });
+
+// Функция проверки прайс-листа
+function validatePriceList() {
+    const fileInput = document.getElementById('priceFile');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+        alert('Выберите файл для проверки');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    // Показываем индикатор загрузки
+    const validateBtn = document.getElementById('validatePriceBtn');
+    const originalText = validateBtn.innerHTML;
+    validateBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Проверка...';
+    validateBtn.disabled = true;
+
+    fetch('/api/validate_price_list', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Восстанавливаем кнопку
+        validateBtn.innerHTML = originalText;
+        validateBtn.disabled = false;
+
+        if (data.success) {
+            showPriceValidationResults(data.analysis);
+        } else {
+            alert('Ошибка проверки: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        validateBtn.innerHTML = originalText;
+        validateBtn.disabled = false;
+        alert('Ошибка при проверке файла');
+    });
+}
+
+// Показать результаты проверки прайс-листа
+function showPriceValidationResults(analysis) {
+    const resultDiv = document.getElementById('priceValidationResult');
+    
+    let message = `
+        <div class="alert alert-info">
+            <h6><i class="bi bi-clipboard-check"></i> Результаты проверки прайс-листа</h6>
+            
+            <div class="row">
+                <div class="col-md-6">
+                    <p><strong>Всего строк в файле:</strong> ${analysis.total_rows}</p>
+                    <p class="text-success"><strong>✅ Корректных строк:</strong> ${analysis.valid_rows}</p>
+                    <p class="text-danger"><strong>❌ Пропущенных строк:</strong> ${analysis.invalid_rows}</p>
+                </div>
+                <div class="col-md-6">
+                    <p><strong>Статистика цен:</strong></p>
+                    <p class="mb-1">Минимальная: <strong>${analysis.price_stats.min_price.toFixed(2)}</strong></p>
+                    <p class="mb-1">Максимальная: <strong>${analysis.price_stats.max_price.toFixed(2)}</strong></p>
+                    <p class="mb-0">Средняя: <strong>${analysis.price_stats.avg_price.toFixed(2)}</strong></p>
+                </div>
+            </div>
+    `;
+
+    if (analysis.new_brands.length > 0) {
+        message += `
+            <div class="mt-3">
+                <p class="text-warning mb-1"><strong>⚠ Новые бренды:</strong> ${analysis.new_brands.length}</p>
+                <ul class="small">
+                    ${analysis.new_brands.map(brand => `<li>${brand}</li>`).join('')}
+                </ul>
+                <small class="text-muted">Проверьте правильность написания брендов</small>
+            </div>
+        `;
+    }
+
+    if (analysis.new_parts.length > 0) {
+        message += `
+            <div class="mt-3">
+                <p class="text-warning mb-1"><strong>⚠ Новые детали (будут добавлены в каталог):</strong> ${analysis.new_parts.length}</p>
+                <ul class="small">
+                    ${analysis.new_parts.slice(0, 10).map(part => `<li>${part}</li>`).join('')}
+                </ul>
+                ${analysis.new_parts.length > 10 ? `<small class="text-muted">... и еще ${analysis.new_parts.length - 10} деталей</small>` : ''}
+            </div>
+        `;
+    }
+
+    if (analysis.existing_parts > 0) {
+        message += `
+            <div class="mt-3">
+                <p class="text-success mb-1"><strong>✅ Существующих деталей в каталоге:</strong> ${analysis.existing_parts}</p>
+                <details>
+                    <summary class="small">Показать список существующих деталей</summary>
+                    <div class="small mt-2" style="max-height: 200px; overflow-y: auto;">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Бренд</th>
+                                    <th>Артикул</th>
+                                    <th>Название</th>
+                                    <th>Цена</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${analysis.existing_parts_list.slice(0, 20).map(part => `
+                                    <tr>
+                                        <td>${part.brand}</td>
+                                        <td>${part.article}</td>
+                                        <td>${part.name}</td>
+                                        <td>${part.price.toFixed(2)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                        ${analysis.existing_parts_list.length > 20 ? `<small class="text-muted">... и еще ${analysis.existing_parts_list.length - 20} деталей</small>` : ''}
+                    </div>
+                </details>
+            </div>
+        `;
+    }
+
+    if (analysis.new_brands.length === 0 && analysis.new_parts.length === 0) {
+        message += `
+            <div class="mt-3">
+                <p class="text-success mb-0"><strong>✅ Все данные есть в каталоге!</strong> Можно загружать прайс-лист.</p>
+            </div>
+        `;
+    } else {
+        message += `
+            <div class="mt-3">
+                <p class="text-warning mb-0"><strong>⚠ Внимание!</strong> При загрузке будут добавлены новые бренды и детали в каталог.</p>
+            </div>
+        `;
+    }
+
+    message += `</div>`;
+    
+    resultDiv.innerHTML = message;
+    resultDiv.style.display = 'block';
+}
+
+// Очистка результатов проверки
+function clearPriceValidation() {
+    document.getElementById('priceValidationResult').style.display = 'none';
+    document.getElementById('priceFile').value = '';
+}
+
 
 // Обработка загрузки каталога
 document.getElementById('catalogUploadForm').addEventListener('submit', function(e) {

@@ -178,6 +178,49 @@ def get_or_create_brand(brand_name, conn):
     
     return brand_id
 
+def get_or_create_part_in_catalog(brand_name, article, conn):
+    """Находит или создает деталь в каталоге, возвращает part_id"""
+    if not brand_name or not article:
+        return None
+    
+    # Находим или создаем бренд
+    brand_id = get_or_create_brand(brand_name, conn)
+    if not brand_id:
+        return None
+    
+    # Ищем деталь в каталоге
+    part = conn.execute(
+        'SELECT id FROM parts_catalog WHERE brand_id = ? AND main_article = ?',
+        (brand_id, article)
+    ).fetchone()
+    
+    if part:
+        return part['id']
+    else:
+        # Создаем новую запись в каталоге
+        cursor = conn.execute(
+            'INSERT INTO parts_catalog (brand_id, main_article) VALUES (?, ?)',
+            (brand_id, article)
+        )
+        return cursor.lastrowid
+
+def normalize_volume_group(volume_group):
+    """Нормализует группу объема"""
+    if not volume_group:
+        return None
+    
+    volume_lower = str(volume_group).lower()
+    if 'топ' in volume_lower or 'top' in volume_lower:
+        return 'top_sales'
+    elif 'хорош' in volume_lower or 'good' in volume_lower:
+        return 'good_demand'
+    elif 'низк' in volume_lower or 'low' in volume_lower:
+        return 'low_demand'
+    elif 'отсут' in volume_lower or 'no' in volume_lower:
+        return 'no_demand'
+    return None
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """Страница входа"""
@@ -357,6 +400,240 @@ def api_brand_synonyms():
         conn.commit()
         conn.close()
         return jsonify({'success': True})
+
+
+@app.route('/api/validate_upload', methods=['POST'])
+def api_validate_upload():
+    """API для проверки файла перед загрузкой"""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    data_type = request.form.get('data_type', 'own_sales')
+    
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    if file and file.filename.endswith(('.xlsx', '.xls')):
+        try:
+            df = pd.read_excel(file)
+            
+            # Маппинг колонок в зависимости от типа данных
+            column_mapping = {}
+            for col in df.columns:
+                col_lower = str(col).lower()
+                if 'артикул' in col_lower: 
+                    column_mapping[col] = 'article'
+                elif 'марка' in col_lower: 
+                    column_mapping[col] = 'brand'
+                elif 'период' in col_lower or 'дата' in col_lower: 
+                    column_mapping[col] = 'period'
+                elif 'количество' in col_lower or 'продажи' in col_lower: 
+                    column_mapping[col] = 'quantity'
+                elif 'группа' in col_lower: 
+                    column_mapping[col] = 'volume_group'
+                elif 'запрос' in col_lower: 
+                    column_mapping[col] = 'requests'
+                elif 'источник' in col_lower: 
+                    column_mapping[col] = 'source'
+            
+            df = df.rename(columns=column_mapping)
+            
+            # Очистка данных
+            if 'article' in df.columns:
+                df['article'] = df['article'].apply(normalize_article)
+            if 'brand' in df.columns:
+                df['brand'] = df['brand'].fillna('').astype(str).str.strip()
+            
+            # Валидация обязательных полей
+            required_fields = ['article', 'brand']
+            missing_fields = [field for field in required_fields if field not in df.columns]
+            if missing_fields:
+                return jsonify({'error': f'Отсутствуют обязательные колонки: {", ".join(missing_fields)}'}), 400
+            
+            df = df.dropna(subset=['article', 'brand'])
+            
+            conn = get_db_connection()
+            
+            # Анализ данных
+            analysis = {
+                'total_rows': len(df),
+                'existing_parts': 0,
+                'new_brands': set(),
+                'new_parts': set(),
+                'errors': []
+            }
+            
+            for _, row in df.iterrows():
+                article = row.get('article', '')
+                brand_name = row.get('brand', '')
+                
+                if not article or not brand_name:
+                    continue
+                
+                # Проверяем существование бренда
+                brand = conn.execute(
+                    'SELECT id FROM brands WHERE name = ?', (brand_name,)
+                ).fetchone()
+                
+                if not brand:
+                    analysis['new_brands'].add(brand_name)
+                    analysis['new_parts'].add(f"{brand_name} - {article}")
+                    continue
+                
+                # Проверяем существование детали в каталоге
+                part = conn.execute(
+                    'SELECT id FROM parts_catalog WHERE brand_id = ? AND main_article = ?',
+                    (brand['id'], article)
+                ).fetchone()
+                
+                if part:
+                    analysis['existing_parts'] += 1
+                else:
+                    analysis['new_parts'].add(f"{brand_name} - {article}")
+            
+            conn.close()
+            
+            # Преобразуем множества в списки для JSON
+            analysis['new_brands'] = list(analysis['new_brands'])
+            analysis['new_parts'] = list(analysis['new_parts'])
+            
+            return jsonify({
+                'success': True,
+                'analysis': analysis,
+                'file_valid': True
+            })
+            
+        except Exception as e:
+            return jsonify({'error': f'Ошибка обработки файла: {str(e)}'}), 500
+    
+    return jsonify({'error': 'Invalid file format'}), 400
+    
+@app.route('/api/validate_price_list', methods=['POST'])
+def api_validate_price_list():
+    """API для проверки прайс-листа перед загрузкой"""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    if file and file.filename.endswith(('.xlsx', '.xls')):
+        try:
+            # Сохраняем временный файл для анализа
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_' + filename)
+            file.save(filepath)
+
+            # Читаем Excel
+            df = pd.read_excel(filepath)
+            
+            # Определяем колонки
+            column_mapping = {}
+            for col in df.columns:
+                col_lower = str(col).lower()
+                if 'артикул' in col_lower: column_mapping[col] = 'article'
+                elif 'марка' in col_lower: column_mapping[col] = 'brand'
+                elif 'название' in col_lower or 'наименование' in col_lower: column_mapping[col] = 'name'
+                elif 'цена' in col_lower: column_mapping[col] = 'price'
+                elif 'вес' in col_lower: column_mapping[col] = 'weight'
+            
+            df = df.rename(columns=column_mapping)
+            
+            # Очистка данных
+            if 'article' in df.columns:
+                df['article'] = df['article'].apply(normalize_article)
+            if 'brand' in df.columns:
+                df['brand'] = df['brand'].fillna('').astype(str).str.strip()
+            
+            # Валидация обязательных полей
+            required_fields = ['article', 'brand', 'price']
+            missing_fields = [field for field in required_fields if field not in df.columns]
+            if missing_fields:
+                # Удаляем временный файл
+                os.remove(filepath)
+                return jsonify({'error': f'Отсутствуют обязательные колонки: {", ".join(missing_fields)}'}), 400
+            
+            df_valid = df.dropna(subset=['article', 'price'])
+            df_invalid = df[df['article'].isna() | df['price'].isna()]
+            
+            conn = get_db_connection()
+            
+            # Анализ данных
+            analysis = {
+                'total_rows': len(df),
+                'valid_rows': len(df_valid),
+                'invalid_rows': len(df_invalid),
+                'existing_parts': 0,
+                'new_brands': set(),
+                'new_parts': set(),
+                'existing_parts_list': [],
+                'price_stats': {
+                    'min_price': df_valid['price'].min() if len(df_valid) > 0 else 0,
+                    'max_price': df_valid['price'].max() if len(df_valid) > 0 else 0,
+                    'avg_price': df_valid['price'].mean() if len(df_valid) > 0 else 0
+                }
+            }
+            
+            for _, row in df_valid.iterrows():
+                article = row.get('article', '')
+                brand_name = row.get('brand', '')
+                price = row.get('price')
+                
+                if not article or not brand_name:
+                    continue
+                
+                # Проверяем существование бренда
+                brand = conn.execute(
+                    'SELECT id FROM brands WHERE name = ?', (brand_name,)
+                ).fetchone()
+                
+                if not brand:
+                    analysis['new_brands'].add(brand_name)
+                    analysis['new_parts'].add(f"{brand_name} - {article}")
+                    continue
+                
+                # Проверяем существование детали в каталоге
+                part = conn.execute(
+                    'SELECT id, name_ru FROM parts_catalog WHERE brand_id = ? AND main_article = ?',
+                    (brand['id'], article)
+                ).fetchone()
+                
+                if part:
+                    analysis['existing_parts'] += 1
+                    analysis['existing_parts_list'].append({
+                        'brand': brand_name,
+                        'article': article,
+                        'name': part['name_ru'] or '-',
+                        'price': price
+                    })
+                else:
+                    analysis['new_parts'].add(f"{brand_name} - {article}")
+            
+            conn.close()
+            
+            # Удаляем временный файл
+            os.remove(filepath)
+            
+            # Преобразуем множества в списки для JSON
+            analysis['new_brands'] = list(analysis['new_brands'])
+            analysis['new_parts'] = list(analysis['new_parts'])
+            
+            return jsonify({
+                'success': True,
+                'analysis': analysis,
+                'file_valid': True
+            })
+            
+        except Exception as e:
+            # Удаляем временный файл в случае ошибки
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            return jsonify({'error': f'Ошибка обработки файла: {str(e)}'}), 500
+    
+    return jsonify({'error': 'Invalid file format'}), 400
 
 
 
@@ -796,24 +1073,16 @@ def api_expected_prices():
     """API для получения актуальных цен продажи"""
     conn = get_db_connection()
     
-    # Получаем самые актуальные цены для каждой детали
     query = '''
-    WITH LatestPrices AS (
-        SELECT 
-            esp.id,
-            esp.brand_id,
-            b.name as brand_name,
-            esp.main_article,
-            esp.price_rub,
-            esp.effective_date,
-            esp.notes,
-            esp.updated_at,
-            ROW_NUMBER() OVER (PARTITION BY esp.brand_id, esp.main_article ORDER BY esp.effective_date DESC, esp.updated_at DESC) as rn
-        FROM expected_sale_prices esp
-        JOIN brands b ON esp.brand_id = b.id
-    )
-    SELECT * FROM LatestPrices WHERE rn = 1
-    ORDER BY brand_name, main_article
+    SELECT 
+        esp.*,
+        b.name as brand_name,
+        pc.main_article,
+        pc.name_ru
+    FROM expected_sale_prices esp
+    JOIN parts_catalog pc ON esp.part_id = pc.id
+    JOIN brands b ON pc.brand_id = b.id
+    ORDER BY b.name, pc.main_article
     '''
     
     prices = conn.execute(query).fetchall()
@@ -821,18 +1090,20 @@ def api_expected_prices():
     
     return jsonify([dict(price) for price in prices])
 
-@app.route('/api/expected_prices/history/<int:brand_id>/<article>')
-def api_expected_prices_history(brand_id, article):
-    """API для получения истории цен по конкретной детали"""
+
+@app.route('/api/expected_prices/history/<int:price_id>')
+def api_expected_prices_history(price_id):
+    """API для получения истории цен по конкретной записи"""
     conn = get_db_connection()
     
     history = conn.execute('''
-        SELECT esp.*, b.name as brand_name
+        SELECT esp.*, b.name as brand_name, pc.main_article
         FROM expected_sale_prices esp
-        JOIN brands b ON esp.brand_id = b.id
-        WHERE esp.brand_id = ? AND esp.main_article = ?
-        ORDER BY esp.effective_date DESC, esp.updated_at DESC
-    ''', (brand_id, article)).fetchall()
+        JOIN parts_catalog pc ON esp.part_id = pc.id
+        JOIN brands b ON pc.brand_id = b.id
+        WHERE esp.id = ?
+        ORDER BY esp.effective_date DESC
+    ''', (price_id,)).fetchall()
     
     conn.close()
     
@@ -843,12 +1114,15 @@ def api_expected_prices_upload():
     """API для загрузки цен из Excel"""
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
+    
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
+    
     if file and file.filename.endswith(('.xlsx', '.xls')):
         try:
             df = pd.read_excel(file)
+            
             # Маппинг колонок
             column_mapping = {}
             for col in df.columns:
@@ -858,68 +1132,64 @@ def api_expected_prices_upload():
                 elif 'цена' in col_lower: column_mapping[col] = 'price'
                 elif 'дата' in col_lower: column_mapping[col] = 'date'
                 elif 'примеч' in col_lower: column_mapping[col] = 'notes'
+            
             df = df.rename(columns=column_mapping)
+            
             # Очистка данных
             if 'article' in df.columns:
                 df['article'] = df['article'].apply(normalize_article)
             if 'brand' in df.columns:
                 df['brand'] = df['brand'].fillna('').astype(str).str.strip()
+            
             df = df.dropna(subset=['article', 'price', 'brand'])
+            
             # Если дата не указана, используем текущую
             if 'date' not in df.columns:
                 df['date'] = datetime.now().date()
+            
             conn = get_db_connection()
             added_count = 0
-            updated_count = 0
-            new_brands = set() # <-- Опять создаем множество
+            new_brands = set()
+            new_parts = set()
+            
             for _, row in df.iterrows():
                 article = row.get('article', '')
                 brand_name = row.get('brand', '')
                 price = row.get('price')
                 effective_date = row.get('date', datetime.now().date())
                 notes = row.get('notes', '')
+                
                 if not article or not brand_name:
                     continue
-
-                # --- ИСПРАВЛЕНО: Проверяем, был ли бренд найден ДО создания ---
-                # Сначала пытаемся найти бренд
-                existing_brand_id = find_brand_by_name(brand_name, conn)
-                if not existing_brand_id:
-                    # Если не нашли, get_or_create_brand создаст новый
-                    # и мы можем добавить имя в new_brands
-                    new_brands.add(brand_name)
-
-                # Теперь находим или создаем бренд
-                brand_id = get_or_create_brand(brand_name, conn)
-
-                if not brand_id:
-                    # Если get_or_create_brand не возвращает ID, что-то пошло не так
-                    print(f"Ошибка: Не удалось получить или создать бренд для '{brand_name}'")
+                
+                # НАХОДИМ ИЛИ СОЗДАЕМ ДЕТАЛЬ В КАТАЛОГЕ
+                part_id = get_or_create_part_in_catalog(brand_name, article, conn)
+                
+                if not part_id:
                     continue
-                # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-
-                # Добавляем/обновляем цену
+                
+                # Добавляем цену с привязкой к каталогу
                 conn.execute('''
-                    INSERT INTO expected_sale_prices
-                    (brand_id, main_article, price_rub, effective_date, notes)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', (brand_id, article, price, effective_date, notes))
+                    INSERT INTO expected_sale_prices 
+                    (part_id, price_rub, effective_date, notes)
+                    VALUES (?, ?, ?, ?)
+                ''', (part_id, price, effective_date, notes))
+                
                 added_count += 1
-
+            
             conn.commit()
             conn.close()
-
+            
             return jsonify({
                 'success': True,
                 'added': added_count,
-                'updated': updated_count, # <-- В твоём коде это всегда 0, но оставим как есть
-                'total': len(df),
-                'new_brands': list(new_brands) # <-- Теперь содержит реальные "новые" бренды
+                'total': len(df)
             })
+            
         except Exception as e:
             return jsonify({'error': f'Ошибка обработки файла: {str(e)}'}), 500
+    
     return jsonify({'error': 'Invalid file format'}), 400
-
 
 @app.route('/api/expected_prices/<int:price_id>', methods=['PUT', 'DELETE'])
 def api_expected_price_item(price_id):
@@ -929,23 +1199,20 @@ def api_expected_price_item(price_id):
     if request.method == 'PUT':
         data = request.get_json()
         
-        # Находим ID бренда по имени
-        brand = conn.execute(
-            'SELECT id FROM brands WHERE name = ?', (data.get('brand', ''),)
-        ).fetchone()
+        # Получаем part_id из каталога по бренду и артикулу
+        part_id = get_or_create_part_in_catalog(data.get('brand', ''), data.get('main_article', ''), conn)
         
-        if not brand:
+        if not part_id:
             conn.close()
-            return jsonify({'error': 'Бренд не найден'}), 400
+            return jsonify({'error': 'Не удалось найти или создать деталь в каталоге'}), 400
         
         # Обновляем цену
         conn.execute('''
             UPDATE expected_sale_prices 
-            SET brand_id = ?, main_article = ?, price_rub = ?, effective_date = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+            SET part_id = ?, price_rub = ?, effective_date = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         ''', (
-            brand['id'],
-            data.get('main_article', ''),
+            part_id,
             data.get('price_rub', 0),
             data.get('effective_date', datetime.now().date()),
             data.get('notes', ''),
@@ -973,7 +1240,6 @@ def manage_sales_statistics():
 def api_sales_statistics():
     """API для получения статистики продаж"""
     data_type = request.args.get('data_type', 'all')
-    volume_group = request.args.get('volume_group', 'all')  # ← ДОБАВИЛИ
     search = request.args.get('search', '')
     conn = get_db_connection()
     
@@ -981,21 +1247,11 @@ def api_sales_statistics():
     SELECT 
         ss.*,
         b.name as brand_name,
-        CASE 
-            WHEN ss.data_type = 'own_sales' THEN 'Мои продажи'
-            WHEN ss.data_type = 'competitor_sales' THEN 'Продажи конкурентов'
-            WHEN ss.data_type = 'analytics_center' THEN 'Аналитический центр'
-            ELSE ss.data_type
-        END as data_type_name,
-        CASE 
-            WHEN ss.volume_group = 'top_sales' THEN 'Топ продаж'
-            WHEN ss.volume_group = 'good_demand' THEN 'Хороший спрос'
-            WHEN ss.volume_group = 'low_demand' THEN 'Низкий спрос'
-            WHEN ss.volume_group = 'no_demand' THEN 'Отсутствие спроса'
-            ELSE ss.volume_group
-        END as volume_group_name
+        pc.main_article,
+        pc.name_ru
     FROM sales_statistics ss
-    JOIN brands b ON ss.brand_id = b.id
+    JOIN parts_catalog pc ON ss.part_id = pc.id
+    JOIN brands b ON pc.brand_id = b.id
     WHERE 1=1
     '''
     
@@ -1005,71 +1261,62 @@ def api_sales_statistics():
         query += ' AND ss.data_type = ?'
         params.append(data_type)
     
-    # ДОБАВЛЯЕМ ФИЛЬТР ПО ГРУППЕ ОБЪЕМА
-    if volume_group != 'all':
-        query += ' AND ss.volume_group = ?'
-        params.append(volume_group)
-    
     if search:
-        query += ' AND (ss.main_article LIKE ? OR b.name LIKE ?)'
+        query += ' AND (pc.main_article LIKE ? OR b.name LIKE ?)'
         search_term = f'%{search}%'
         params.extend([search_term, search_term])
     
-    query += ' ORDER BY ss.period DESC, b.name, ss.main_article'
+    query += ' ORDER BY ss.period DESC, b.name, pc.main_article'
     
     stats = conn.execute(query, params).fetchall()
     conn.close()
     
     return jsonify([dict(stat) for stat in stats])
+
     
 @app.route('/api/sales_statistics/upload', methods=['POST'])
 def api_sales_statistics_upload():
     """API для загрузки статистики из Excel"""
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
+    
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
+    
     data_type = request.form.get('data_type', 'own_sales')
+    
     if file and file.filename.endswith(('.xlsx', '.xls')):
         try:
             df = pd.read_excel(file)
-            # Маппинг колонок в зависимости от типа данных
+            
+            # Маппинг колонок
             column_mapping = {}
             for col in df.columns:
                 col_lower = str(col).lower()
-                if 'артикул' in col_lower: 
-                    column_mapping[col] = 'article'
-                elif 'марка' in col_lower: 
-                    column_mapping[col] = 'brand'
-                elif 'период' in col_lower or 'дата' in col_lower: 
-                    column_mapping[col] = 'period'
-                elif 'количество' in col_lower or 'продажи' in col_lower or 'шт' in col_lower: 
-                    column_mapping[col] = 'quantity'
-                elif 'группа' in col_lower: 
-                    column_mapping[col] = 'volume_group'
-                elif 'запрос' in col_lower: 
-                    column_mapping[col] = 'requests'
-                elif 'источник' in col_lower: 
-                    column_mapping[col] = 'source'
-                elif 'примеч' in col_lower: 
-                    column_mapping[col] = 'notes'
+                if 'артикул' in col_lower: column_mapping[col] = 'article'
+                elif 'марка' in col_lower: column_mapping[col] = 'brand'
+                elif 'период' in col_lower or 'дата' in col_lower: column_mapping[col] = 'period'
+                elif 'количество' in col_lower: column_mapping[col] = 'quantity'
+                elif 'группа' in col_lower: column_mapping[col] = 'volume_group'
+                elif 'запрос' in col_lower: column_mapping[col] = 'requests'
+                elif 'источник' in col_lower: column_mapping[col] = 'source'
+                elif 'примеч' in col_lower: column_mapping[col] = 'notes'
+            
             df = df.rename(columns=column_mapping)
+            
             # Очистка данных
             if 'article' in df.columns:
                 df['article'] = df['article'].apply(normalize_article)
             if 'brand' in df.columns:
                 df['brand'] = df['brand'].fillna('').astype(str).str.strip()
-            # Валидация обязательных полей
-            required_fields = ['article', 'brand', 'period']
-            missing_fields = [field for field in required_fields if field not in df.columns]
-            if missing_fields:
-                return jsonify({'error': f'Отсутствуют обязательные колонки: {", ".join(missing_fields)}'}), 400
+            
             df = df.dropna(subset=['article', 'brand', 'period'])
+            
             conn = get_db_connection()
             added_count = 0
             updated_count = 0
-            new_brands = set()
+            
             for _, row in df.iterrows():
                 article = row.get('article', '')
                 brand_name = row.get('brand', '')
@@ -1079,8 +1326,10 @@ def api_sales_statistics_upload():
                 requests = row.get('requests')
                 source = row.get('source', '')
                 notes = row.get('notes', '')
+                
                 if not article or not brand_name:
                     continue
+                
                 # Преобразуем период в дату
                 try:
                     if isinstance(period, str):
@@ -1089,43 +1338,28 @@ def api_sales_statistics_upload():
                         period_date = period.date() if hasattr(period, 'date') else datetime.now().date()
                 except:
                     period_date = datetime.now().date()
-
-                # --- ИСПРАВЛЕНО: Проверяем, был ли бренд найден ДО создания ---
-                existing_brand_id = find_brand_by_name(brand_name, conn)
-                if not existing_brand_id:
-                    new_brands.add(brand_name)
-
-                # Теперь находим или создаем бренд
-                brand_id = get_or_create_brand(brand_name, conn)
-
-                if not brand_id:
-                    # Если get_or_create_brand не возвращает ID, что-то пошло не так
-                    print(f"Ошибка: Не удалось получить или создать бренд для '{brand_name}'")
+                
+                # НАХОДИМ ИЛИ СОЗДАЕМ ДЕТАЛЬ В КАТАЛОГЕ
+                part_id = get_or_create_part_in_catalog(brand_name, article, conn)
+                
+                if not part_id:
                     continue
-                # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-
+                
                 # Нормализуем группу объема
-                volume_group_normalized = None
-                if volume_group:
-                    volume_lower = str(volume_group).lower()
-                    if 'топ' in volume_lower or 'top' in volume_lower:
-                        volume_group_normalized = 'top_sales'
-                    elif 'хорош' in volume_lower or 'good' in volume_lower:
-                        volume_group_normalized = 'good_demand'
-                    elif 'низк' in volume_lower or 'low' in volume_lower:
-                        volume_group_normalized = 'low_demand'
-                    elif 'отсут' in volume_lower or 'no' in volume_lower:
-                        volume_group_normalized = 'no_demand'
+                volume_group_normalized = normalize_volume_group(volume_group)
+                
                 # Проверяем существование записи
                 existing = conn.execute('''
                     SELECT id FROM sales_statistics 
-                    WHERE brand_id = ? AND main_article = ? AND data_type = ? AND period = ?
-                ''', (brand_id, article, data_type, period_date)).fetchone()
+                    WHERE part_id = ? AND data_type = ? AND period = ?
+                ''', (part_id, data_type, period_date)).fetchone()
+                
                 if existing:
                     # Обновляем существующую запись
                     conn.execute('''
                         UPDATE sales_statistics 
-                        SET quantity = ?, volume_group = ?, requests_per_month = ?, source_name = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+                        SET quantity = ?, volume_group = ?, requests_per_month = ?, 
+                            source_name = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
                     ''', (quantity, volume_group_normalized, requests, source, notes, existing['id']))
                     updated_count += 1
@@ -1133,23 +1367,27 @@ def api_sales_statistics_upload():
                     # Добавляем новую запись
                     conn.execute('''
                         INSERT INTO sales_statistics 
-                        (brand_id, main_article, data_type, period, quantity, volume_group, requests_per_month, source_name, notes)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (brand_id, article, data_type, period_date, quantity, volume_group_normalized, requests, source, notes))
+                        (part_id, data_type, period, quantity, volume_group, 
+                         requests_per_month, source_name, notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (part_id, data_type, period_date, quantity, volume_group_normalized, 
+                          requests, source, notes))
                     added_count += 1
+            
             conn.commit()
             conn.close()
+            
             return jsonify({
                 'success': True,
                 'added': added_count,
                 'updated': updated_count,
-                'total': len(df),
-                'new_brands': list(new_brands)
+                'total': len(df)
             })
+            
         except Exception as e:
             return jsonify({'error': f'Ошибка обработки файла: {str(e)}'}), 500
-    return jsonify({'error': 'Invalid file format'}), 400    
-
+    
+    return jsonify({'error': 'Invalid file format'}), 400
 
 @app.route('/api/sales_statistics/<int:stat_id>', methods=['PUT', 'DELETE'])
 def api_sales_statistics_item(stat_id):
@@ -1236,7 +1474,7 @@ def api_sales_statistics_aggregated():
     return jsonify([dict(stat) for stat in stats])
 
     
-#  ================== КАТАЛОГ ==================
+# ================== КАТАЛОГ ==================
 @app.route('/catalog')
 def catalog_management():
     """Главная страница управления каталогом"""

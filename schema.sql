@@ -85,49 +85,38 @@ CREATE TABLE IF NOT EXISTS delivery_costs (
     FOREIGN KEY (region_id) REFERENCES regions (id)
 );
 
--- Таблица ожидаемых цен продажи
+-- ОЖИДАЕМЫЕ ЦЕНЫ ПРОДАЖИ (ПЕРЕДЕЛАНА!)
 CREATE TABLE IF NOT EXISTS expected_sale_prices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    brand_id INTEGER NOT NULL,
-    main_article TEXT NOT NULL,
+    part_id INTEGER NOT NULL,  -- Связь с каталогом!
     price_rub REAL NOT NULL,
     effective_date DATE NOT NULL,
     notes TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (brand_id) REFERENCES brands (id)
+    FOREIGN KEY (part_id) REFERENCES parts_catalog (id)
 );
 
--- Индексы для быстрого поиска
-CREATE INDEX IF NOT EXISTS idx_expected_prices_brand_article ON expected_sale_prices(brand_id, main_article);
-CREATE INDEX IF NOT EXISTS idx_expected_prices_date ON expected_sale_prices(effective_date);
-CREATE INDEX IF NOT EXISTS idx_expected_prices_article ON expected_sale_prices(main_article);
-
--- Таблица статистики продаж
+-- СТАТИСТИКА ПРОДАЖ (ПЕРЕДЕЛАНА!)
 CREATE TABLE IF NOT EXISTS sales_statistics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    brand_id INTEGER NOT NULL,
-    main_article TEXT NOT NULL,
-    data_type TEXT NOT NULL,  -- 'own_sales', 'competitor_sales', 'analytics_center'
-    period DATE NOT NULL,      -- Период данных (год-месяц)
-    quantity INTEGER,          -- Количество продаж/запросов
-    volume_group TEXT,         -- Группа объема: 'top_sales', 'good_demand', 'low_demand', 'no_demand'
-    requests_per_month INTEGER,-- Количество запросов в месяц (для analytics_center)
-    source_name TEXT,          -- Название источника (для competitor_sales)
+    part_id INTEGER NOT NULL,  -- Связь с каталогом!
+    data_type TEXT NOT NULL,
+    period DATE NOT NULL,
+    quantity INTEGER,
+    volume_group TEXT,
+    requests_per_month INTEGER,
+    source_name TEXT,
     notes TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (brand_id) REFERENCES brands (id)
+    FOREIGN KEY (part_id) REFERENCES parts_catalog (id)
 );
 
--- Индексы для быстрого поиска
-CREATE INDEX IF NOT EXISTS idx_sales_stats_brand_article ON sales_statistics(brand_id, main_article);
+CREATE INDEX IF NOT EXISTS idx_expected_prices_part ON expected_sale_prices(part_id);
+CREATE INDEX IF NOT EXISTS idx_sales_stats_part ON sales_statistics(part_id);
 CREATE INDEX IF NOT EXISTS idx_sales_stats_type ON sales_statistics(data_type);
 CREATE INDEX IF NOT EXISTS idx_sales_stats_period ON sales_statistics(period);
-CREATE INDEX IF NOT EXISTS idx_sales_stats_volume_group ON sales_statistics(volume_group);
-
-
-
 
 
 -- Индексы для оптимизации

@@ -8,148 +8,62 @@
     </a>
 </div>
 
-<!-- Фильтры и управление -->
-<div class="card mb-4">
-    <div class="card-body">
-        <div class="row g-3">
-            <div class="col-md-3">
-                <label class="form-label">Тип данных</label>
-                <select class="form-select" id="dataTypeFilter" onchange="loadStatistics()">
-                    <option value="all">Все типы</option>
-                    <option value="own_sales">Мои продажи</option>
-                    <option value="competitor_sales">Продажи конкурентов</option>
-                    <option value="analytics_center">Аналитический центр</option>
-                </select>
-            </div>
-            <div class="col-md-3">
-                <label class="form-label">Группа спроса</label>
-                <select class="form-select" id="volumeGroupFilter" onchange="loadStatistics()">
-                    <option value="all">Все группы</option>
-                    <option value="top_sales">Топ продаж</option>
-                    <option value="good_demand">Хороший спрос</option>
-                    <option value="low_demand">Низкий спрос</option>
-                    <option value="no_demand">Отсутствие спроса</option>
-                </select>
-            </div>
-            <div class="col-md-4">
-                <label class="form-label">Поиск по артикулу</label>
-                <input type="text" class="form-control" id="searchFilter" placeholder="Артикул или марка..." oninput="loadStatistics()">
-            </div>
-            <div class="col-md-2">
-                <label class="form-label">&nbsp;</label>
-                <button class="btn btn-outline-secondary w-100" onclick="clearFilters()">
-                    <i class="bi bi-x-circle"></i> Сброс
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
+<!-- Навигация вкладками -->
+<ul class="nav nav-tabs mb-4" id="statsTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="view-tab" data-bs-toggle="tab" data-bs-target="#view" type="button">
+            <i class="bi bi-table"></i> Просмотр данных
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="upload-tab" data-bs-toggle="tab" data-bs-target="#upload" type="button">
+            <i class="bi bi-upload"></i> Загрузка данных
+        </button>
+    </li>
+</ul>
 
-<div class="row">
-    <!-- Левая колонка - загрузка данных -->
-    <div class="col-lg-4">
-        <!-- Формы загрузки для каждого типа данных -->
+<!-- Содержимое вкладок -->
+<div class="tab-content" id="statsTabsContent">
+    <!-- ВКЛАДКА ПРОСМОТРА -->
+    <div class="tab-pane fade show active" id="view" role="tabpanel">
+        <!-- Фильтры -->
         <div class="card mb-4">
-            <div class="card-header">
-                <h5><i class="bi bi-upload"></i> Загрузка статистики</h5>
-            </div>
             <div class="card-body">
-                <ul class="nav nav-tabs" id="uploadTabs" role="tablist">
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#ownSalesTab" type="button">
-                            Мои продажи
-                        </button>
-                    </li>
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#competitorTab" type="button">
-                            Конкуренты
-                        </button>
-                    </li>
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#analyticsTab" type="button">
-                            Аналитика
-                        </button>
-                    </li>
-                </ul>
-                
-                <div class="tab-content mt-3">
-                    <!-- Мои продажи -->
-                    <div class="tab-pane fade show active" id="ownSalesTab">
-                        <form class="upload-form" data-type="own_sales">
-                            <div class="mb-3">
-                                <label class="form-label">Файл с продажами</label>
-                                <input type="file" class="form-control" accept=".xlsx,.xls" required>
-                                <div class="form-text">
-                                    Колонки: Артикул, Марка, Период, Количество
-                                </div>
-                            </div>
-                            <button type="submit" class="btn btn-success w-100">
-                                <i class="bi bi-upload"></i> Загрузить мои продажи
-                            </button>
-                        </form>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Тип данных</label>
+                        <select class="form-select" id="dataTypeFilter" onchange="loadStatistics()">
+                            <option value="all">Все типы</option>
+                            <option value="own_sales">Мои продажи</option>
+                            <option value="competitor_sales">Продажи конкурентов</option>
+                            <option value="analytics_center">Аналитический центр</option>
+                        </select>
                     </div>
-                    
-                    <!-- Продажи конкурентов -->
-                    <div class="tab-pane fade" id="competitorTab">
-                        <form class="upload-form" data-type="competitor_sales">
-                            <div class="mb-3">
-                                <label class="form-label">Файл с данными конкурентов</label>
-                                <input type="file" class="form-control" accept=".xlsx,.xls" required>
-                                <div class="form-text">
-                                    Колонки: Артикул, Марка, Период, Количество, Источник
-                                </div>
-                            </div>
-                            <button type="submit" class="btn btn-warning w-100">
-                                <i class="bi bi-upload"></i> Загрузить данные конкурентов
-                            </button>
-                        </form>
+                    <div class="col-md-3">
+                        <label class="form-label">Группа спроса</label>
+                        <select class="form-select" id="volumeGroupFilter" onchange="loadStatistics()">
+                            <option value="all">Все группы</option>
+                            <option value="top_sales">Топ продаж</option>
+                            <option value="good_demand">Хороший спрос</option>
+                            <option value="low_demand">Низкий спрос</option>
+                            <option value="no_demand">Отсутствие спроса</option>
+                        </select>
                     </div>
-                    
-                    <!-- Аналитический центр -->
-                    <div class="tab-pane fade" id="analyticsTab">
-                        <form class="upload-form" data-type="analytics_center">
-                            <div class="mb-3">
-                                <label class="form-label">Файл аналитики</label>
-                                <input type="file" class="form-control" accept=".xlsx,.xls" required>
-                                <div class="form-text">
-                                    Колонки: Артикул, Марка, Период, Группа, Запросы
-                                </div>
-                            </div>
-                            <button type="submit" class="btn btn-info w-100">
-                                <i class="bi bi-upload"></i> Загрузить аналитику
-                            </button>
-                        </form>
+                    <div class="col-md-4">
+                        <label class="form-label">Поиск по артикулу</label>
+                        <input type="text" class="form-control" id="searchFilter" placeholder="Артикул или марка..." oninput="loadStatistics()">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">&nbsp;</label>
+                        <button class="btn btn-outline-secondary w-100" onclick="clearFilters()">
+                            <i class="bi bi-x-circle"></i> Сброс
+                        </button>
                     </div>
                 </div>
-                
-                <div id="uploadResult" class="mt-3" style="display: none;"></div>
             </div>
         </div>
 
-        <!-- Информация о форматах -->
-        <div class="card">
-            <div class="card-header">
-                <h6><i class="bi bi-info-circle"></i> Форматы файлов</h6>
-            </div>
-            <div class="card-body">
-                <p class="small mb-2">
-                    <strong>Обязательные для всех:</strong><br>
-                    • Артикул<br>
-                    • Марка<br>
-                    • Период (ГГГГ-ММ-ДД)
-                </p>
-                <p class="small mb-0 text-muted">
-                    <strong>Дополнительно:</strong><br>
-                    • <strong>Мои продажи:</strong> Количество<br>
-                    • <strong>Конкуренты:</strong> Количество, Источник<br>
-                    • <strong>Аналитика:</strong> Группа, Запросы
-                </p>
-            </div>
-        </div>
-    </div>
-
-    <!-- Правая колонка - таблица статистики -->
-    <div class="col-lg-8">
+        <!-- Таблица статистики -->
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5><i class="bi bi-table"></i> Статистика продаж</h5>
@@ -163,6 +77,7 @@
                                 <th>Тип данных</th>
                                 <th>Марка</th>
                                 <th>Артикул</th>
+                                <th>Название</th>
                                 <th>Период</th>
                                 <th>Количество</th>
                                 <th>Группа</th>
@@ -173,7 +88,7 @@
                         </thead>
                         <tbody id="statsTableBody">
                             <tr>
-                                <td colspan="9" class="text-center">Загрузка данных...</td>
+                                <td colspan="10" class="text-center">Загрузка данных...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -181,7 +96,124 @@
             </div>
         </div>
     </div>
+
+    <!-- ВКЛАДКА ЗАГРУЗКИ -->
+    <div class="tab-pane fade" id="upload" role="tabpanel">
+        <div class="row">
+            <div class="col-lg-8 mx-auto">
+                <!-- Формы загрузки для каждого типа данных -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="bi bi-upload"></i> Загрузка статистики</h5>
+                    </div>
+                    <div class="card-body">
+                        <ul class="nav nav-tabs" id="uploadTabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#ownSalesTab" type="button">
+                                    Мои продажи
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#competitorTab" type="button">
+                                    Конкуренты
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#analyticsTab" type="button">
+                                    Аналитика
+                                </button>
+                            </li>
+                        </ul>
+                        
+                        <div class="tab-content mt-3">
+                            <!-- Мои продажи -->
+                            <div class="tab-pane fade show active" id="ownSalesTab">
+<form class="upload-form" data-type="own_sales">
+    <div class="mb-3">
+        <label class="form-label">Файл с продажами</label>
+        <input type="file" class="form-control file-input" accept=".xlsx,.xls" required>
+        <div class="form-text">
+            Колонки: Артикул, Марка, Период, Количество
+        </div>
+    </div>
+    
+    <!-- КНОПКИ ПРОВЕРКИ И ЗАГРУЗКИ -->
+    <div class="row g-2">
+        <div class="col-6">
+            <button type="button" class="btn btn-outline-primary w-100 validate-btn">
+                <i class="bi bi-search"></i> Проверить файл
+            </button>
+        </div>
+        <div class="col-6">
+            <button type="submit" class="btn btn-success w-100 upload-btn">
+                <i class="bi bi-upload"></i> Загрузить мои продажи
+            </button>
+        </div>
+    </div>
+</form>                            </div>
+                            
+                            <!-- Продажи конкурентов -->
+                            <div class="tab-pane fade" id="competitorTab">
+                                <form class="upload-form" data-type="competitor_sales">
+                                    <div class="mb-3">
+                                        <label class="form-label">Файл с данными конкурентов</label>
+                                        <input type="file" class="form-control" accept=".xlsx,.xls" required>
+                                        <div class="form-text">
+                                            Колонки: Артикул, Марка, Период, Количество, Источник
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-warning w-100">
+                                        <i class="bi bi-upload"></i> Загрузить данные конкурентов
+                                    </button>
+                                </form>
+                            </div>
+                            
+                            <!-- Аналитический центр -->
+                            <div class="tab-pane fade" id="analyticsTab">
+                                <form class="upload-form" data-type="analytics_center">
+                                    <div class="mb-3">
+                                        <label class="form-label">Файл аналитики</label>
+                                        <input type="file" class="form-control" accept=".xlsx,.xls" required>
+                                        <div class="form-text">
+                                            Колонки: Артикул, Марка, Период, Группа, Запросы
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-info w-100">
+                                        <i class="bi bi-upload"></i> Загрузить аналитику
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                        
+                        <div id="uploadResult" class="mt-3" style="display: none;"></div>
+                    </div>
+                </div>
+
+                <!-- Информация о форматах -->
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h6><i class="bi bi-info-circle"></i> Форматы файлов</h6>
+                    </div>
+                    <div class="card-body">
+                        <p class="small mb-2">
+                            <strong>Обязательные для всех:</strong><br>
+                            • Артикул<br>
+                            • Марка<br>
+                            • Период (ГГГГ-ММ-ДД)
+                        </p>
+                        <p class="small mb-0 text-muted">
+                            <strong>Дополнительно:</strong><br>
+                            • <strong>Мои продажи:</strong> Количество<br>
+                            • <strong>Конкуренты:</strong> Количество, Источник<br>
+                            • <strong>Аналитика:</strong> Группа, Запросы
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
+
 
 <!-- Модальное окно редактирования -->
 <div class="modal fade" id="editStatModal" tabindex="-1">
@@ -304,29 +336,30 @@ function displayStats(stats) {
     
     countBadge.textContent = `${stats.length} записей`;
     
-    tbody.innerHTML = stats.map(stat => {
-        const typeBadge = getDataTypeBadge(stat.data_type);
-        const groupBadge = getVolumeGroupBadge(stat.volume_group);
-        
-        return `
-            <tr>
-                <td>${typeBadge}</td>
-                <td>${stat.brand_name}</td>
-                <td>${stat.main_article}</td>
-                <td>${stat.period}</td>
-                <td>${stat.quantity ? `<span class="fw-bold">${stat.quantity} шт</span>` : '-'}</td>
-                <td>${groupBadge}</td>
-                <td>${stat.requests_per_month || '-'}</td>
-                <td>${stat.source_name || '-'}</td>
-                <td>
-                    <button class="btn btn-sm btn-outline-primary" 
-                            onclick="editStat(${stat.id})">
-                        <i class="bi bi-pencil"></i>
-                    </button>
-                </td>
-            </tr>
-        `;
-    }).join('');
+tbody.innerHTML = stats.map(stat => {
+    const typeBadge = getDataTypeBadge(stat.data_type);
+    const groupBadge = getVolumeGroupBadge(stat.volume_group);
+    
+    return `
+        <tr>
+            <td>${typeBadge}</td>
+            <td>${stat.brand_name}</td>
+            <td>${stat.main_article}</td>
+            <td>${stat.name_ru || '-'}</td>  <!-- НОВОЕ ПОЛЕ -->
+            <td>${stat.period}</td>
+            <td>${stat.quantity ? `<span class="fw-bold">${stat.quantity} шт</span>` : '-'}</td>
+            <td>${groupBadge}</td>
+            <td>${stat.requests_per_month || '-'}</td>
+            <td>${stat.source_name || '-'}</td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary" 
+                        onclick="editStat(${stat.id})">
+                    <i class="bi bi-pencil"></i>
+                </button>
+            </td>
+        </tr>
+    `;
+}).join('');
 }
 
 // Вспомогательные функции для бейджей
@@ -514,6 +547,123 @@ function clearFilters() {
     loadStatistics();
 }
 
+// Функция проверки файла
+function validateFile(file, dataType) {
+    if (!file) {
+        alert('Выберите файл для проверки');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('data_type', dataType);
+
+    // Показываем индикатор загрузки
+    const validateBtn = event.target;
+    const originalText = validateBtn.innerHTML;
+    validateBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Проверка...';
+    validateBtn.disabled = true;
+
+    fetch('/api/validate_upload', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Восстанавливаем кнопку
+        validateBtn.innerHTML = originalText;
+        validateBtn.disabled = false;
+
+        if (data.success) {
+            showValidationResults(data.analysis, dataType);
+        } else {
+            alert('Ошибка проверки: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        validateBtn.innerHTML = originalText;
+        validateBtn.disabled = false;
+        alert('Ошибка при проверке файла');
+    });
+}
+
+// Показать результаты проверки
+function showValidationResults(analysis, dataType) {
+    const resultDiv = document.getElementById('uploadResult');
+    
+    let message = `
+        <div class="alert alert-info">
+            <h6><i class="bi bi-clipboard-check"></i> Результаты проверки</h6>
+            <p><strong>Всего строк в файле:</strong> ${analysis.total_rows}</p>
+            <p><strong>Существующих деталей в каталоге:</strong> ${analysis.existing_parts}</p>
+    `;
+
+    if (analysis.new_brands.length > 0) {
+        message += `
+            <div class="mt-3">
+                <p class="text-warning mb-1"><strong>⚠ Новые бренды:</strong> ${analysis.new_brands.length}</p>
+                <ul class="small">
+                    ${analysis.new_brands.map(brand => `<li>${brand}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+
+    if (analysis.new_parts.length > 0) {
+        message += `
+            <div class="mt-3">
+                <p class="text-warning mb-1"><strong>⚠ Новые детали (будут добавлены в каталог):</strong> ${analysis.new_parts.length}</p>
+                <ul class="small">
+                    ${analysis.new_parts.map(part => `<li>${part}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+
+    if (analysis.new_brands.length === 0 && analysis.new_parts.length === 0) {
+        message += `
+            <div class="mt-3">
+                <p class="text-success mb-0"><strong>✅ Все данные есть в каталоге!</strong> Можно загружать файл.</p>
+            </div>
+        `;
+    } else {
+        message += `
+            <div class="mt-3">
+                <p class="text-warning mb-0"><strong>⚠ Внимание!</strong> При загрузке будут добавлены новые бренды и детали в каталог.</p>
+            </div>
+        `;
+    }
+
+    message += `</div>`;
+    
+    resultDiv.innerHTML = message;
+    resultDiv.style.display = 'block';
+}
+
+// Обновим настройку форм загрузки
+function setupUploadForms() {
+    document.querySelectorAll('.upload-form').forEach(form => {
+        const fileInput = form.querySelector('.file-input');
+        const validateBtn = form.querySelector('.validate-btn');
+        const uploadBtn = form.querySelector('.upload-btn');
+        const dataType = form.dataset.type;
+
+        // Обработчик проверки
+        validateBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            validateFile(fileInput.files[0], dataType);
+        });
+
+        // Обработчик загрузки (оставляем существующий)
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            uploadStatistics(fileInput.files[0], dataType);
+        });
+    });
+}
+
+
 // Устанавливаем текущий месяц по умолчанию в форме редактирования
 document.getElementById('editPeriod').value = new Date().toISOString().split('T')[0];
 </script>
@@ -528,6 +678,17 @@ document.getElementById('editPeriod').value = new Date().toISOString().split('T'
 }
 .badge {
     font-size: 0.75rem;
+}
+.validate-btn, .upload-btn {
+    font-size: 0.875rem;
+}
+.alert ul {
+    margin-bottom: 0;
+    max-height: 200px;
+    overflow-y: auto;
+}
+.small li {
+    padding: 2px 0;
 }
 </style>
 {% endblock %}
