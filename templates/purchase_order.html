@@ -441,42 +441,57 @@ function renderRegionCells(item) {
     return html;
 }
 
-function renderSingleRegion(regionData, salePrice) {
-    console.log('regionData:', regionData); // ОТЛАДКА
-    
-    if (!regionData || regionData.price_rub === null || regionData.price_rub === undefined) {
-        return '<td class="table-warning">Нет данных</td>';
+function renderSingleRegion(regionData, salePrice, regionName) {
+    if (!regionData || regionData.price_rub === null) {
+        return `<td class="table-warning" title="${regionName}: Нет данных">Нет данных</td>`;
     }
     
     let cellClass = '';
-    let tooltip = '';
+    let icon = '';
+    let tooltip = `title="${regionName}`;
+    const profit = regionData.profit_percent;
     
-    // Проверяем наличие всех необходимых полей
-    const priceRub = regionData.price_rub;
-    const profitPercent = regionData.profit_percent;
-    const isBestPrice = regionData.is_best_price;
-    
-    console.log('Данные для отображения:', { priceRub, profitPercent, isBestPrice }); // ОТЛАДКА
-    
-    if (isBestPrice) {
-        cellClass = 'table-success';
-        tooltip = 'title="Лучшая цена"';
-    } else if (profitPercent > 15) {
-        cellClass = 'table-primary';
-        tooltip = 'title="Высокая прибыль"';
-    } else if (profitPercent < 0) {
+    // Цвет по прибыли
+    if (profit < 0) {
         cellClass = 'table-danger';
-        tooltip = 'title="Убыток"';
+        icon = '<i class="bi bi-arrow-down-circle text-danger"></i>';
+        tooltip += ' - УБЫТОК';
+    } else if (profit > 20) {
+        cellClass = 'table-success';
+        icon = '<i class="bi bi-arrow-up-circle text-success"></i>';
+        tooltip += ' - Очень высокая прибыль';
+    } else if (profit > 10) {
+        cellClass = 'table-primary';
+        icon = '<i class="bi bi-arrow-up-circle text-primary"></i>';
+        tooltip += ' - Хорошая прибыль';
+    } else if (profit > 0) {
+        cellClass = 'table-info';
+        icon = '<i class="bi bi-dash-circle text-info"></i>';
+        tooltip += ' - Низкая прибыль';
+    } else {
+        cellClass = '';
+        icon = '<i class="bi bi-dash-circle text-secondary"></i>';
+        tooltip += ' - Безубыточно';
     }
     
-    const priceText = priceRub.toFixed(2);
-    const profitText = profitPercent !== null && profitPercent !== undefined ? 
-        `${profitPercent}%` : '—';
+    // Добавляем звезду для лучшей цены
+    if (regionData.is_best_price) {
+        icon = '<i class="bi bi-star-fill text-warning"></i> ' + icon;
+        tooltip += ' (Лучшая цена)';
+    }
+    
+    tooltip += `"`;
+    
+    const priceText = regionData.price_rub.toFixed(2);
+    const profitText = profit !== null ? `${profit}%` : '—';
     
     return `
         <td class="${cellClass}" ${tooltip}>
             <div class="small">
-                <strong>${priceText} руб.</strong><br>
+                <div class="d-flex justify-content-between align-items-center">
+                    <span>${icon}</span>
+                    <strong>${priceText} руб.</strong>
+                </div>
                 <small>${profitText}</small>
             </div>
         </td>
