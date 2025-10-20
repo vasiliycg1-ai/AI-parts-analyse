@@ -118,6 +118,29 @@ CREATE INDEX IF NOT EXISTS idx_sales_stats_part ON sales_statistics(part_id);
 CREATE INDEX IF NOT EXISTS idx_sales_stats_type ON sales_statistics(data_type);
 CREATE INDEX IF NOT EXISTS idx_sales_stats_period ON sales_statistics(period);
 
+-- Таблица для сохранения заказов
+CREATE TABLE IF NOT EXISTS purchase_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_name TEXT NOT NULL,
+    order_date DATE NOT NULL,
+    coefficient REAL DEFAULT 0.835,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Детали заказа
+CREATE TABLE IF NOT EXISTS order_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    part_id INTEGER NOT NULL,
+    quantity INTEGER NOT NULL,
+    custom_weight REAL,  -- Если переопределяем вес
+    custom_sale_price REAL,  -- Если переопределяем цену продажи
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (order_id) REFERENCES purchase_orders (id),
+    FOREIGN KEY (part_id) REFERENCES parts_catalog (id)
+);
+
 
 -- Индексы для оптимизации
 CREATE INDEX IF NOT EXISTS idx_parts_brand_id ON parts_catalog(brand_id);

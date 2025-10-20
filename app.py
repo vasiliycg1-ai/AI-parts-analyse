@@ -635,7 +635,344 @@ def api_validate_price_list():
     
     return jsonify({'error': 'Invalid file format'}), 400
 
+# ===== ЗАКАЗЫ =====
+@app.route('/purchase_order')
+def purchase_order():
+    """Страница подготовки заказа"""
+    return render_template('purchase_order.html')
 
+@app.route('/api/order/upload', methods=['POST'])
+def api_order_upload():
+    """API для загрузки файла заказа"""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    order_name = request.form.get('order_name', '')
+    
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    if not order_name:
+        return jsonify({'error': 'Order name is required'}), 400
+    
+    if file and file.filename.endswith(('.xlsx', '.xls')):
+        try:
+            df = pd.read_excel(file)
+            
+            # Маппинг колонок
+            column_mapping = {}
+            for col in df.columns:
+                col_lower = str(col).lower()
+                if 'марка' in col_lower: column_mapping[col] = 'brand'
+                elif 'артикул' in col_lower: column_mapping[col] = 'article'
+                elif 'количество' in col_lower or 'кол-во' in col_lower: column_mapping[col] = 'quantity'
+            
+            df = df.rename(columns=column_mapping)
+            
+            # Очистка данных
+            if 'article' in df.columns:
+                df['article'] = df['article'].apply(normalize_article)
+            if 'brand' in df.columns:
+                df['brand'] = df['brand'].fillna('').astype(str).str.strip()
+            
+            # Валидация обязательных полей
+            required_fields = ['brand', 'article', 'quantity']
+            missing_fields = [field for field in required_fields if field not in df.columns]
+            if missing_fields:
+                return jsonify({'error': f'Отсутствуют обязательные колонки: {", ".join(missing_fields)}'}), 400
+            
+            df = df.dropna(subset=['brand', 'article', 'quantity'])
+            
+            conn = get_db_connection()
+            order_items = []
+            
+            for _, row in df.iterrows():
+                article = row.get('article', '')
+                brand_name = row.get('brand', '')
+                quantity = int(row.get('quantity', 1))
+                
+                if not article or not brand_name:
+                    continue
+                
+                # Ищем деталь в каталоге
+                part_data = conn.execute('''
+                    SELECT pc.id, pc.main_article, pc.name_ru, pc.weight, b.name as brand_name
+                    FROM parts_catalog pc
+                    JOIN brands b ON pc.brand_id = b.id
+                    WHERE b.name = ? AND pc.main_article = ?
+                ''', (brand_name, article)).fetchone()
+                
+                # Ищем цену продажи
+                sale_price_data = conn.execute('''
+                    SELECT esp.price_rub
+                    FROM expected_sale_prices esp
+                    JOIN parts_catalog pc ON esp.part_id = pc.id
+                    JOIN brands b ON pc.brand_id = b.id
+                    WHERE b.name = ? AND pc.main_article = ?
+                    ORDER BY esp.effective_date DESC
+                    LIMIT 1
+                ''', (brand_name, article)).fetchone()
+                
+                # Ищем статистику
+                stats_data = conn.execute('''
+                    SELECT ss.data_type, ss.quantity
+                    FROM sales_statistics ss
+                    JOIN parts_catalog pc ON ss.part_id = pc.id
+                    JOIN brands b ON pc.brand_id = b.id
+                    WHERE b.name = ? AND pc.main_article = ?
+                    ORDER BY ss.period DESC
+                    LIMIT 5
+                ''', (brand_name, article)).fetchall()
+                
+                # Формируем статистику
+                statistics = format_statistics(stats_data)
+                
+                order_items.append({
+                    'brand': brand_name,
+                    'article': article,
+                    'name': part_data['name_ru'] if part_data else None,
+                    'catalog_weight': part_data['weight'] if part_data else None,
+                    'quantity': quantity,
+                    'sale_price': sale_price_data['price_rub'] if sale_price_data else None,
+                    'statistics': statistics
+                })
+            
+            conn.close()
+            
+            return jsonify({
+                'success': True,
+                'order_data': {
+                    'name': order_name,
+                    'items': order_items,
+                    'coefficient': 0.835
+                }
+            })
+            
+        except Exception as e:
+            return jsonify({'error': f'Ошибка обработки файла: {str(e)}'}), 500
+    
+    return jsonify({'error': 'Invalid file format'}), 400
+
+def format_statistics(stats_data):
+    """Форматирование статистики для отображения"""
+    if not stats_data:
+        return None
+    
+    own_sales = []
+    competitor_sales = []
+    analytics_data = []
+    
+    for stat in stats_data:
+        if stat['data_type'] == 'own_sales' and stat['quantity']:
+            own_sales.append(stat['quantity'])
+        elif stat['data_type'] == 'competitor_sales' and stat['quantity']:
+            competitor_sales.append(stat['quantity'])
+        elif stat['data_type'] == 'analytics_center':
+            analytics_data.append(stat)
+    
+    # Если есть точные данные по продажам
+    if own_sales or competitor_sales:
+        own_str = sum(own_sales) if own_sales else '0'
+        competitor_str = sum(competitor_sales) if competitor_sales else '0'
+        return f"{own_str}/{competitor_str}"
+    
+    # Если есть аналитика
+    if analytics_data:
+        latest_analytics = analytics_data[0]
+        if latest_analytics.get('volume_group'):
+            volume_groups = {
+                'top_sales': 'Топ',
+                'good_demand': 'Хор',
+                'low_demand': 'Низк',
+                'no_demand': 'Нет'
+            }
+            group = volume_groups.get(latest_analytics['volume_group'], latest_analytics['volume_group'])
+            requests = latest_analytics.get('requests_per_month', '')
+            return f"{group}" + (f"/{requests}" if requests else "")
+    
+    return None
+
+@app.route('/api/order/calculate', methods=['POST'])
+def api_order_calculate():
+    """API для расчета цен по регионам"""
+    data = request.get_json()
+    order_items = data.get('items', [])
+    coefficient = float(data.get('coefficient', 0.835))
+    
+    conn = get_db_connection()
+    
+    try:
+        # Получаем актуальные курсы валют
+        currency_rates = get_currency_rates(conn)
+        
+        # Получаем стоимость доставки по регионам
+        delivery_costs = get_delivery_costs(conn)
+        
+        # Рассчитываем цены для каждого элемента
+        for item in order_items:
+            item['regions'] = calculate_region_prices(
+                item, currency_rates, delivery_costs, coefficient, conn
+            )
+        
+        return jsonify({
+            'success': True,
+            'order_data': {
+                'items': order_items,
+                'coefficient': coefficient
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'Ошибка расчета: {str(e)}'}), 500
+    finally:
+        conn.close()
+
+def get_currency_rates(conn):
+    """Получаем актуальные курсы валют"""
+    rates = conn.execute('''
+        SELECT currency_code, rate_to_rub 
+        FROM currency_rates 
+        ORDER BY created_at DESC
+    ''').fetchall()
+    
+    return {rate['currency_code']: rate['rate_to_rub'] for rate in rates}
+
+def get_delivery_costs(conn):
+    """Получаем стоимость доставки по регионам"""
+    costs = conn.execute('''
+        SELECT r.name as region_name, dc.cost_per_kg, dc.min_cost
+        FROM delivery_costs dc
+        JOIN regions r ON dc.region_id = r.id
+        WHERE r.name IN ('Китай', 'ОАЭ', 'Япония')
+    ''').fetchall()
+    
+    return {cost['region_name']: cost for cost in costs}
+
+def calculate_region_prices(item, currency_rates, delivery_costs, coefficient, conn):
+    """Рассчитываем цены для всех регионов"""
+    regions_data = {}
+    brand_name = item.get('brand', '')
+    article = item.get('article', '')
+    weight = item.get('catalog_weight', 0) or 0
+    
+    # Для каждого региона получаем лучшую цену
+    for region_name in ['Китай', 'ОАЭ', 'Япония']:
+        region_data = calculate_single_region_price(
+            brand_name, article, region_name, weight, 
+            currency_rates, delivery_costs, coefficient, conn
+        )
+        regions_data[region_name.lower()] = region_data
+    
+    # Находим регион с лучшей ценой
+    find_best_region(regions_data, item.get('sale_price'))
+    
+    return regions_data
+
+def calculate_single_region_price(brand_name, article, region_name, weight, 
+                                currency_rates, delivery_costs, coefficient, conn):
+    """Рассчитываем цену для одного региона"""
+    # Получаем лучшую цену в регионе
+    best_price_data = get_best_region_price(brand_name, article, region_name, conn)
+    
+    if not best_price_data:
+        return {
+            'price_original': None,
+            'currency': None,
+            'price_rub': None,
+            'supplier': None,
+            'profit_percent': None,
+            'is_best_price': False,
+            'is_high_profit': False
+        }
+    
+    # Рассчитываем стоимость доставки
+    delivery_cost = calculate_delivery_cost(weight, delivery_costs.get(region_name))
+    
+    # Конвертируем в рубли
+    price_rub = convert_to_rub(
+        best_price_data['price'], 
+        best_price_data['currency'], 
+        currency_rates,
+        delivery_cost,
+        coefficient
+    )
+    
+    return {
+        'price_original': best_price_data['price'],
+        'currency': best_price_data['currency'],
+        'price_rub': price_rub,
+        'supplier': best_price_data['supplier_name'],
+        'profit_percent': None,  # Рассчитаем позже
+        'is_best_price': False,
+        'is_high_profit': False
+    }
+
+def get_best_region_price(brand_name, article, region_name, conn):
+    """Находим лучшую цену в указанном регионе"""
+    query = '''
+    WITH RegionPrices AS (
+        SELECT 
+            p.price,
+            s.currency,
+            s.name as supplier_name,
+            pl.upload_date,
+            ROW_NUMBER() OVER (ORDER BY p.price ASC, pl.upload_date DESC) as rn
+        FROM prices p
+        JOIN price_lists pl ON p.price_list_id = pl.id
+        JOIN suppliers s ON pl.supplier_id = s.id
+        JOIN regions r ON s.region_id = r.id
+        JOIN parts_catalog pc ON p.part_id = pc.id
+        JOIN brands b ON pc.brand_id = b.id
+        WHERE b.name = ? AND pc.main_article = ? AND r.name = ? AND pl.is_active = 1
+    )
+    SELECT * FROM RegionPrices WHERE rn = 1
+    '''
+    
+    return conn.execute(query, (brand_name, article, region_name)).fetchone()
+
+def calculate_delivery_cost(weight, delivery_data):
+    """Рассчитываем стоимость доставки"""
+    if not delivery_data:
+        return 0
+    
+    cost_by_weight = weight * delivery_data['cost_per_kg']
+    return max(delivery_data['min_cost'], cost_by_weight)
+
+def convert_to_rub(price, currency, currency_rates, delivery_cost, coefficient):
+    """Конвертируем цену в рубли по формуле"""
+    if currency == 'RUB':
+        price_rub = price
+    else:
+        rate = currency_rates.get(currency, 1)
+        price_rub = price * rate
+    
+    # Формула: (Цена в валюте × Курс + Доставка) / Коэффициент
+    return (price_rub + delivery_cost) / coefficient
+
+def find_best_region(regions_data, sale_price):
+    """Находим лучший регион и рассчитываем прибыль"""
+    if not sale_price:
+        return
+    
+    # Находим минимальную цену среди регионов с данными
+    valid_regions = {name: data for name, data in regions_data.items() 
+                    if data['price_rub'] is not None}
+    
+    if not valid_regions:
+        return
+    
+    best_region_name = min(valid_regions.keys(), 
+                          key=lambda x: valid_regions[x]['price_rub'])
+    
+    # Рассчитываем прибыль для всех регионов и отмечаем лучший
+    for region_name, data in regions_data.items():
+        if data['price_rub']:
+            profit = (sale_price / data['price_rub'] - 1) * 100
+            data['profit_percent'] = round(profit, 1)
+            data['is_best_price'] = (region_name == best_region_name)
+            data['is_high_profit'] = (profit > 15)  # Прибыль более 15%
+            
 
 # ================== ПОСТАВЩИКИ ==================
 @app.route('/suppliers', methods=['GET', 'POST'])
