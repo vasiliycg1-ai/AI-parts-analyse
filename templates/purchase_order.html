@@ -73,18 +73,21 @@
 
 <!-- Таблица заказа (изначально скрыта) -->
 <div class="card" id="orderTableCard" style="display: none;">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <h5><i class="bi bi-table"></i> Детали заказа</h5>
-        <div>
-            <span id="orderStats" class="badge bg-primary me-2">0 позиций</span>
-            <button class="btn btn-sm btn-outline-secondary me-2" onclick="addManualRow()">
-                <i class="bi bi-plus-circle"></i> Добавить строку
-            </button>
-            <button class="btn btn-sm btn-success" id="exportBtn" style="display: none;">
-                <i class="bi bi-download"></i> Экспорт в Excel
-            </button>
-        </div>
+<div class="card-header d-flex justify-content-between align-items-center">
+    <h5><i class="bi bi-table"></i> Детали заказа</h5>
+    <div>
+        <span id="orderStats" class="badge bg-primary me-2">0 позиций</span>
+        <button class="btn btn-sm btn-outline-secondary me-2" onclick="addManualRow()">
+            <i class="bi bi-plus-circle"></i> Добавить строку
+        </button>
+        <button class="btn btn-sm btn-warning me-2" onclick="saveOrder()" id="saveOrderBtn">
+            <i class="bi bi-floppy"></i> Сохранить заказ
+        </button>
+        <button class="btn btn-sm btn-success" id="exportBtn" style="display: none;">
+            <i class="bi bi-download"></i> Экспорт в Excel
+        </button>
     </div>
+</div>
     <div class="card-body">
         <div class="table-responsive">
             <table class="table table-striped table-hover" id="orderTable">
@@ -116,32 +119,66 @@
 </div>
 
 <!-- Модальное окно для добавления/редактирования строки -->
+<!-- Модальное окно для добавления/редактирования строки -->
 <div class="modal fade" id="editOrderItemModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="editModalTitle">Добавление позиции</h5>
+                <h5 class="modal-title" id="editModalTitle">Редактирование позиции</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
                 <form id="editOrderItemForm">
                     <input type="hidden" id="editItemIndex">
-                    <div class="mb-3">
-                        <label class="form-label">Марка *</label>
-                        <input type="text" class="form-control" id="editBrand" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Артикул *</label>
-                        <input type="text" class="form-control" id="editArticle" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Количество *</label>
-                        <input type="number" class="form-control" id="editQuantity" min="1" required>
+                    <input type="hidden" id="editPartId">
+                    
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Марка *</label>
+                            <input type="text" class="form-control" id="editBrand" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Артикул *</label>
+                            <input type="text" class="form-control" id="editArticle" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Количество *</label>
+                            <input type="number" class="form-control" id="editQuantity" min="1" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Вес (кг)</label>
+                            <input type="number" step="0.001" class="form-control" id="editWeight">
+                            <div class="form-text">Из каталога: <span id="catalogWeightText">-</span></div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Цена продажи (руб)</label>
+                            <input type="number" step="0.01" class="form-control" id="editSalePrice">
+                            <div class="form-text">Текущая: <span id="currentPriceText">-</span></div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Название детали</label>
+                            <input type="text" class="form-control" id="editName" readonly>
+                        </div>
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="editUpdateCatalog">
+                                <label class="form-check-label" for="editUpdateCatalog">
+                                    Обновить данные в каталоге
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="editUpdatePrice">
+                                <label class="form-check-label" for="editUpdatePrice">
+                                    Обновить цену продажи
+                                </label>
+                            </div>
+                        </div>
                     </div>
                 </form>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-danger" onclick="deleteOrderItem()">Удалить</button>
                 <button type="button" class="btn btn-primary" onclick="saveOrderItem()">Сохранить</button>
             </div>
         </div>
@@ -198,7 +235,7 @@ document.getElementById('uploadOrderForm').addEventListener('submit', function(e
             }, 500);
             
             document.getElementById('orderTableCard').style.display = 'block';
-            document.getElementById('exportBtn').style.display = 'inline-block';
+//            document.getElementById('exportBtn').style.display = 'inline-block';
             
             document.getElementById('uploadResult').innerHTML = `
                 <div class="alert alert-success">
@@ -266,6 +303,58 @@ function recalculateOrder() {
     });
 }
 
+// Экспорт заказа в Excel
+function exportToExcel() {
+    if (currentOrder.items.length === 0) {
+        alert('Нет данных для экспорта');
+        return;
+    }
+    
+    // Показываем индикатор загрузки
+    const exportBtn = document.getElementById('exportBtn');
+    const originalText = exportBtn.innerHTML;
+    exportBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Экспорт...';
+    exportBtn.disabled = true;
+
+    fetch('/api/order/export', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            order_data: currentOrder
+        })
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Ошибка экспорта');
+        }
+        return response.blob();
+    })
+    .then(blob => {
+        // Создаем ссылку для скачивания
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = `заказ_${new Date().toISOString().slice(0,10)}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        // Восстанавливаем кнопку
+        exportBtn.innerHTML = originalText;
+        exportBtn.disabled = false;
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        exportBtn.innerHTML = originalText;
+        exportBtn.disabled = false;
+        alert('Ошибка при экспорте в Excel');
+    });
+}
+
 // Отображение элементов заказа
 function displayOrderItems() {
     const tbody = document.getElementById('orderTableBody');
@@ -282,6 +371,11 @@ function displayOrderItems() {
     // Показываем карточку расчета если есть данные
     if (currentOrder.items.some(item => item.regions)) {
         document.getElementById('calculationCard').style.display = 'block';
+    }
+
+    if (currentOrder.items.length > 0) {
+        document.getElementById('exportBtn').style.display = 'inline-block';
+        document.getElementById('exportBtn').onclick = exportToExcel;
     }
     
     // ОТЛАДКА: выведем структуру данных в консоль
@@ -335,7 +429,7 @@ function getPriceClass(item) {
 
 // Отрисовка ячеек регионов
 function renderRegionCells(item) {
-    const regions = ['china', 'uae', 'japan'];
+    const regions = ['китай', 'оаэ', 'япония'];
     let html = '';
     
     regions.forEach(region => {
@@ -454,6 +548,233 @@ function saveOrderItem() {
     
     bootstrap.Modal.getInstance(document.getElementById('editOrderItemModal')).hide();
 }
+
+// Поиск детали при изменении бренда или артикула
+function findPart() {
+    const brand = document.getElementById('editBrand').value;
+    const article = document.getElementById('editArticle').value;
+    
+    if (!brand || !article) {
+        return;
+    }
+    
+    fetch('/api/order/find_part', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            brand: brand,
+            article: article
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.found) {
+            const part = data.part_data;
+            document.getElementById('editPartId').value = part.id;
+            document.getElementById('editName').value = part.name || '-';
+            document.getElementById('catalogWeightText').textContent = 
+                part.weight ? part.weight.toFixed(3) + ' кг' : 'Нет данных';
+            document.getElementById('currentPriceText').textContent = 
+                part.sale_price ? part.sale_price.toFixed(2) + ' руб.' : 'Нет данных';
+            
+            // Заполняем поля если они пустые
+            if (!document.getElementById('editWeight').value && part.weight) {
+                document.getElementById('editWeight').value = part.weight;
+            }
+            if (!document.getElementById('editSalePrice').value && part.sale_price) {
+                document.getElementById('editSalePrice').value = part.sale_price;
+            }
+        } else {
+            document.getElementById('editPartId').value = '';
+            document.getElementById('editName').value = 'Деталь не найдена в каталоге';
+            document.getElementById('catalogWeightText').textContent = '-';
+            document.getElementById('currentPriceText').textContent = '-';
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+    });
+}
+
+// Обновленные функции редактирования
+function addManualRow() {
+    document.getElementById('editModalTitle').textContent = 'Добавление позиции';
+    document.getElementById('editItemIndex').value = '';
+    document.getElementById('editPartId').value = '';
+    document.getElementById('editBrand').value = '';
+    document.getElementById('editArticle').value = '';
+    document.getElementById('editQuantity').value = '1';
+    document.getElementById('editWeight').value = '';
+    document.getElementById('editSalePrice').value = '';
+    document.getElementById('editName').value = '';
+    document.getElementById('catalogWeightText').textContent = '-';
+    document.getElementById('currentPriceText').textContent = '-';
+    document.getElementById('editUpdateCatalog').checked = false;
+    document.getElementById('editUpdatePrice').checked = false;
+    
+    // Убираем кнопку удаления для новой строки
+    document.querySelector('[onclick="deleteOrderItem()"]').style.display = 'none';
+    
+    new bootstrap.Modal(document.getElementById('editOrderItemModal')).show();
+}
+
+function editOrderItem(index) {
+    const item = currentOrder.items[index];
+    document.getElementById('editModalTitle').textContent = 'Редактирование позиции';
+    document.getElementById('editItemIndex').value = index;
+    document.getElementById('editPartId').value = item.part_id || '';
+    document.getElementById('editBrand').value = item.brand;
+    document.getElementById('editArticle').value = item.article;
+    document.getElementById('editQuantity').value = item.quantity;
+    document.getElementById('editWeight').value = item.custom_weight || item.catalog_weight || '';
+    document.getElementById('editSalePrice').value = item.custom_sale_price || item.sale_price || '';
+    document.getElementById('editName').value = item.name || '-';
+    document.getElementById('catalogWeightText').textContent = 
+        item.catalog_weight ? item.catalog_weight.toFixed(3) + ' кг' : 'Нет данных';
+    document.getElementById('currentPriceText').textContent = 
+        item.sale_price ? item.sale_price.toFixed(2) + ' руб.' : 'Нет данных';
+    document.getElementById('editUpdateCatalog').checked = false;
+    document.getElementById('editUpdatePrice').checked = false;
+    
+    // Показываем кнопку удаления для существующей строки
+    document.querySelector('[onclick="deleteOrderItem()"]').style.display = 'inline-block';
+    
+    new bootstrap.Modal(document.getElementById('editOrderItemModal')).show();
+}
+
+// Сохранение позиции с обновлением данных
+function saveOrderItem() {
+    const index = document.getElementById('editItemIndex').value;
+    const brand = document.getElementById('editBrand').value;
+    const article = document.getElementById('editArticle').value;
+    const quantity = parseInt(document.getElementById('editQuantity').value);
+    const weight = document.getElementById('editWeight').value ? 
+        parseFloat(document.getElementById('editWeight').value) : null;
+    const salePrice = document.getElementById('editSalePrice').value ? 
+        parseFloat(document.getElementById('editSalePrice').value) : null;
+    const updateCatalog = document.getElementById('editUpdateCatalog').checked;
+    const updatePrice = document.getElementById('editUpdatePrice').checked;
+    const partId = document.getElementById('editPartId').value;
+    
+    if (!brand || !article || !quantity) {
+        alert('Заполните обязательные поля (Марка, Артикул, Количество)');
+        return;
+    }
+    
+    const itemData = {
+        brand: brand,
+        article: article,
+        quantity: quantity,
+        part_id: partId || null,
+        custom_weight: weight,
+        custom_sale_price: salePrice,
+        update_catalog: updateCatalog,
+        update_price: updatePrice,
+        name: document.getElementById('editName').value || null
+    };
+    
+    // Если это новая позиция, ищем деталь в каталоге
+    if (!partId) {
+        fetch('/api/order/find_part', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                brand: brand,
+                article: article
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.found) {
+                itemData.part_id = data.part_data.id;
+                itemData.name = data.part_data.name;
+                itemData.catalog_weight = data.part_data.weight;
+                saveItemToOrder(index, itemData);
+            } else {
+                // Создаем позицию без привязки к каталогу
+                saveItemToOrder(index, itemData);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            saveItemToOrder(index, itemData);
+        });
+    } else {
+        saveItemToOrder(index, itemData);
+    }
+}
+
+function saveItemToOrder(index, itemData) {
+    if (index === '') {
+        // Новая строка
+        currentOrder.items.push(itemData);
+    } else {
+        // Редактирование существующей
+        currentOrder.items[index] = itemData;
+    }
+    
+    displayOrderItems();
+    
+    // Пересчитываем цены после сохранения
+    setTimeout(() => {
+        recalculateOrder();
+    }, 100);
+    
+    bootstrap.Modal.getInstance(document.getElementById('editOrderItemModal')).hide();
+}
+
+// Удаление позиции из модального окна
+function deleteOrderItem() {
+    const index = document.getElementById('editItemIndex').value;
+    if (index !== '' && confirm('Удалить эту позицию из заказа?')) {
+        currentOrder.items.splice(index, 1);
+        displayOrderItems();
+        bootstrap.Modal.getInstance(document.getElementById('editOrderItemModal')).hide();
+    }
+}
+
+// Сохранение всего заказа
+function saveOrder() {
+    if (!currentOrder.name || currentOrder.items.length === 0) {
+        alert('Нет данных для сохранения');
+        return;
+    }
+    
+    fetch('/api/order/save', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            order_name: currentOrder.name,
+            items: currentOrder.items,
+            coefficient: currentOrder.coefficient
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+        } else {
+            alert('Ошибка сохранения: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ошибка при сохранении заказа');
+    });
+}
+
+// Добавим слушатели событий для поиска детали
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('editBrand').addEventListener('blur', findPart);
+    document.getElementById('editArticle').addEventListener('blur', findPart);
+});
+
 
 // Удаление позиции
 function removeOrderItem(index) {

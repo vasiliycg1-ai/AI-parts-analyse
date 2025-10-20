@@ -1,13 +1,20 @@
 import os
 import re
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, send_file
+from flask_caching import Cache
 import pandas as pd
 import sqlite3
 from datetime import datetime
 from werkzeug.utils import secure_filename
+from io import BytesIO  # ← ДОБАВИТЬ ЭТОТ ИМПОРТ
+from openpyxl import Workbook  # ← И ЭТОТ ТОЖЕ
+from openpyxl.styles import Font  # ← И ЭТОТ ДЛЯ ФОРМАТИРОВАНИЯ
 
 # Сначала создаем app, потом импортируем конфиг
 app = Flask(__name__)
+
+cache = Cache(config={'CACHE_TYPE': 'SimpleCache'})
+cache.init_app(app)
 
 # Определяем среду и загружаем конфиг
 try:
@@ -863,7 +870,7 @@ def calculate_region_prices(item, currency_rates, delivery_costs, coefficient, c
             currency_rates, delivery_costs, coefficient, conn
         )
         regions_data[region_name.lower()] = region_data
-    
+
     # Находим регион с лучшей ценой
     find_best_region(regions_data, item.get('sale_price'))
     
@@ -973,6 +980,208 @@ def find_best_region(regions_data, sale_price):
             data['is_best_price'] = (region_name == best_region_name)
             data['is_high_profit'] = (profit > 15)  # Прибыль более 15%
             
+
+@app.route('/api/order/save', methods=['POST'])
+def api_order_save():
+    """API для сохранения заказа и обновления данных"""
+    data = request.get_json()
+    order_name = data.get('order_name', '')
+    order_items = data.get('items', [])
+    coefficient = data.get('coefficient', 0.835)
+    
+    if not order_name:
+        return jsonify({'error': 'Order name is required'}), 400
+    
+    conn = get_db_connection()
+    
+    try:
+        # Сохраняем заказ
+        cursor = conn.execute('''
+            INSERT INTO purchase_orders (order_name, order_date, coefficient)
+            VALUES (?, DATE('now'), ?)
+        ''', (order_name, coefficient))
+        order_id = cursor.lastrowid
+        
+        # Сохраняем позиции заказа и обновляем данные
+        for item in order_items:
+            part_id = item.get('part_id')
+            quantity = item.get('quantity', 1)
+            custom_weight = item.get('custom_weight')
+            custom_sale_price = item.get('custom_sale_price')
+            update_catalog = item.get('update_catalog', False)
+            update_price = item.get('update_price', False)
+            
+            if not part_id:
+                continue
+            
+            # Сохраняем позицию заказа
+            conn.execute('''
+                INSERT INTO order_items (order_id, part_id, quantity, custom_weight, custom_sale_price)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (order_id, part_id, quantity, custom_weight, custom_sale_price))
+            
+            # Обновляем каталог если нужно
+            if update_catalog and custom_weight is not None:
+                conn.execute('''
+                    UPDATE parts_catalog 
+                    SET weight = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                ''', (custom_weight, part_id))
+            
+            # Обновляем цену продажи если нужно
+            if update_price and custom_sale_price is not None:
+                conn.execute('''
+                    INSERT INTO expected_sale_prices (part_id, price_rub, effective_date)
+                    VALUES (?, ?, DATE('now'))
+                ''', (part_id, custom_sale_price))
+        
+        conn.commit()
+        
+        return jsonify({
+            'success': True,
+            'order_id': order_id,
+            'message': f'Заказ "{order_name}" успешно сохранен'
+        })
+        
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': f'Ошибка сохранения: {str(e)}'}), 500
+    finally:
+        conn.close()
+
+@app.route('/api/order/find_part', methods=['POST'])
+def api_order_find_part():
+    """API для поиска детали по бренду и артикулу"""
+    data = request.get_json()
+    brand_name = data.get('brand', '')
+    article = data.get('article', '')
+    
+    if not brand_name or not article:
+        return jsonify({'error': 'Brand and article are required'}), 400
+    
+    conn = get_db_connection()
+    
+    try:
+        # Ищем деталь в каталоге
+        part_data = conn.execute('''
+            SELECT pc.id, pc.main_article, pc.name_ru, pc.weight, b.name as brand_name
+            FROM parts_catalog pc
+            JOIN brands b ON pc.brand_id = b.id
+            WHERE b.name = ? AND pc.main_article = ?
+        ''', (brand_name, article)).fetchone()
+        
+        # Ищем цену продажи
+        sale_price_data = conn.execute('''
+            SELECT esp.price_rub
+            FROM expected_sale_prices esp
+            JOIN parts_catalog pc ON esp.part_id = pc.id
+            JOIN brands b ON pc.brand_id = b.id
+            WHERE b.name = ? AND pc.main_article = ?
+            ORDER BY esp.effective_date DESC
+            LIMIT 1
+        ''', (brand_name, article)).fetchone()
+        
+        if not part_data:
+            return jsonify({
+                'success': True,
+                'found': False,
+                'message': 'Деталь не найдена в каталоге'
+            })
+        
+        return jsonify({
+            'success': True,
+            'found': True,
+            'part_data': {
+                'id': part_data['id'],
+                'brand': part_data['brand_name'],
+                'article': part_data['main_article'],
+                'name': part_data['name_ru'],
+                'weight': part_data['weight'],
+                'sale_price': sale_price_data['price_rub'] if sale_price_data else None
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'Ошибка поиска: {str(e)}'}), 500
+    finally:
+        conn.close()
+        
+        
+@app.route('/api/order/export', methods=['POST'])
+def api_order_export():
+    """API для экспорта заказа в Excel"""
+    data = request.get_json()
+    order_data = data.get('order_data', {})
+    
+    try:
+        # Создаем DataFrame для экспорта
+        export_data = []
+        
+        for item in order_data.get('items', []):
+            row = {
+                'Марка': item.get('brand', ''),
+                'Артикул': item.get('article', ''),
+                'Название': item.get('name', ''),
+                'Вес_кг': item.get('catalog_weight') or item.get('custom_weight'),
+                'Количество': item.get('quantity', 0),
+                'Цена_продажи_руб': item.get('sale_price') or item.get('custom_sale_price'),
+                'Статистика': item.get('statistics', '')
+            }
+            
+            # Добавляем данные по регионам
+            regions = item.get('regions', {})
+            for region_name in ['китай', 'ОАЭ', 'Япония']:
+                region_data = regions.get(region_name, {})
+                row[f'Цена_{region_name}_руб'] = region_data.get('price_rub')
+                row[f'Прибыль_{region_name}_%'] = region_data.get('profit_percent')
+                row[f'Поставщик_{region_name}'] = region_data.get('supplier', '')
+            
+            export_data.append(row)
+        
+        # Создаем DataFrame
+        df = pd.DataFrame(export_data)
+        
+        # Создаем Excel файл в памяти
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Заказ', index=False)
+            
+            # Получаем workbook и worksheet для форматирования
+            workbook = writer.book
+            worksheet = writer.sheets['Заказ']
+            
+            # Настраиваем ширину колонок
+            column_widths = {
+                'A': 15, 'B': 20, 'C': 30, 'D': 10, 'E': 12, 'F': 15, 'G': 15,
+                'H': 15, 'I': 15, 'J': 15, 'K': 15, 'L': 15, 'M': 15, 'N': 20, 'O': 20, 'P': 20
+            }
+            
+            for col, width in column_widths.items():
+                worksheet.column_dimensions[col].width = width
+            
+            # Сдвигаем таблицу вниз на 3 строки
+            worksheet.insert_rows(1, 3)
+
+            # Добавляем заголовки
+            worksheet['A1'].value = f"Заказ: {order_data.get('name', 'Без названия')}"
+            worksheet['A2'].value = f"Коэффициент: {order_data.get('coefficient', 0.835)}"
+            worksheet['A3'].value = f"Дата экспорта: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            
+        
+        output.seek(0)
+        
+        # Возвращаем файл
+        filename = f"заказ_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        return jsonify({'error': f'Ошибка экспорта: {str(e)}'}), 500
+        
 
 # ================== ПОСТАВЩИКИ ==================
 @app.route('/suppliers', methods=['GET', 'POST'])
@@ -2213,6 +2422,7 @@ def check_currency_rates(conn):
 
 # ================== АНАЛИЗ ЦЕН ==================
 @app.route('/analysis')
+@cache.cached(timeout=300)  # 5 минут
 def analysis():
     conn = get_db_connection()
 

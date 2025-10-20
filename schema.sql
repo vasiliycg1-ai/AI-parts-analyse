@@ -150,3 +150,9 @@ CREATE INDEX IF NOT EXISTS idx_price_lists_active ON price_lists(is_active, uplo
 CREATE INDEX IF NOT EXISTS idx_prices_part ON prices(part_id);
 CREATE INDEX IF NOT EXISTS idx_suppliers_region ON suppliers(region_id);
 CREATE INDEX IF NOT EXISTS idx_brands_name ON brands(name);
+
+-- Добавить в schema.sql
+CREATE INDEX IF NOT EXISTS idx_prices_composite ON prices(part_id, price_list_id);
+CREATE INDEX IF NOT EXISTS idx_price_lists_supplier_date ON price_lists(supplier_id, upload_date DESC);
+CREATE INDEX IF NOT EXISTS idx_parts_brand_article ON parts_catalog(brand_id, main_article);
+
