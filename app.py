@@ -712,7 +712,7 @@ def api_order_upload():
                 
                 # Ищем цену продажи
                 sale_price_data = conn.execute('''
-                    SELECT esp.price_rub
+                    SELECT esp.price_rub, esp.effective_date
                     FROM expected_sale_prices esp
                     JOIN parts_catalog pc ON esp.part_id = pc.id
                     JOIN brands b ON pc.brand_id = b.id
@@ -742,6 +742,7 @@ def api_order_upload():
                     'catalog_weight': part_data['weight'] if part_data else None,
                     'quantity': quantity,
                     'sale_price': sale_price_data['price_rub'] if sale_price_data else None,
+                    'sale_price_date': sale_price_data['effective_date'] if sale_price_data else None,
                     'statistics': statistics
                 })
             
@@ -799,6 +800,69 @@ def format_statistics(stats_data):
             return f"{group}" + (f"/{requests}" if requests else "")
     
     return None
+
+@app.route('/api/order/update_item', methods=['POST'])
+def api_order_update_item():
+    """API для обновления данных отдельной позиции"""
+    data = request.get_json()
+    
+    brand_name = data.get('brand', '')
+    article = data.get('article', '')
+    weight = data.get('weight')
+    sale_price = data.get('sale_price')
+    update_catalog = data.get('update_catalog', False)
+    update_price = data.get('update_price', False)
+    
+    if not brand_name or not article:
+        return jsonify({'error': 'Brand and article are required'}), 400
+    
+    conn = get_db_connection()
+    
+    try:
+        # Находим деталь в каталоге
+        part_data = conn.execute('''
+            SELECT pc.id, pc.weight as current_weight
+            FROM parts_catalog pc
+            JOIN brands b ON pc.brand_id = b.id
+            WHERE b.name = ? AND pc.main_article = ?
+        ''', (brand_name, article)).fetchone()
+        
+        if not part_data:
+            return jsonify({'error': 'Деталь не найдена в каталоге'}), 404
+        
+        part_id = part_data['id']
+        updates_made = []
+        
+        # Обновляем вес в каталоге если нужно
+        if update_catalog and weight is not None:
+            conn.execute('''
+                UPDATE parts_catalog 
+                SET weight = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ''', (weight, part_id))
+            updates_made.append(f'вес обновлен: {weight} кг')
+        
+        # Обновляем цену продажи если нужно
+        if update_price and sale_price is not None:
+            conn.execute('''
+                INSERT INTO expected_sale_prices (part_id, price_rub, effective_date)
+                VALUES (?, ?, DATE('now'))
+            ''', (part_id, sale_price))
+            updates_made.append(f'цена продажи обновлена: {sale_price} руб')
+        
+        conn.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Данные обновлены: {", ".join(updates_made)}',
+            'part_id': part_id
+        })
+        
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': f'Ошибка обновления: {str(e)}'}), 500
+    finally:
+        conn.close()
 
 @app.route('/api/order/calculate', methods=['POST'])
 def api_order_calculate():
@@ -1134,12 +1198,25 @@ def api_order_load(order_id):
         for item in order_items:
             # Ищем актуальную цену продажи
             sale_price_data = conn.execute('''
-                SELECT price_rub 
+                SELECT price_rub, effective_date 
                 FROM expected_sale_prices 
                 WHERE part_id = ? 
                 ORDER BY effective_date DESC 
                 LIMIT 1
             ''', (item['part_id'],)).fetchone()
+
+            # Ищем статистику
+            stats_data = conn.execute('''
+                SELECT ss.data_type, ss.quantity
+                FROM sales_statistics ss
+                WHERE part_id= ?
+                ORDER BY ss.period DESC
+                LIMIT 5
+            ''', (item['part_id'],)).fetchall()
+            
+            # Формируем статистику
+            statistics = format_statistics(stats_data)
+
             
             item_data = {
                 'brand': item['brand_name'],
@@ -1149,7 +1226,9 @@ def api_order_load(order_id):
                 'custom_weight': item['custom_weight'],
                 'quantity': item['quantity'],
                 'sale_price': sale_price_data['price_rub'] if sale_price_data else None,
+                'sale_price_date': sale_price_data['effective_date'] if sale_price_data else None,
                 'custom_sale_price': item['custom_sale_price'],
+                'statistics': statistics,
                 'part_id': item['part_id']
             }
             

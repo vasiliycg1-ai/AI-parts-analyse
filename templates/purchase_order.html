@@ -105,8 +105,8 @@
         <button class="btn btn-sm btn-warning me-2" onclick="saveOrder()" id="saveOrderBtn">
             <i class="bi bi-floppy"></i> Сохранить заказ
         </button>
-        <button class="btn btn-sm btn-success" id="exportBtn" style="display: none;">
-            <i class="bi bi-download"></i> Экспорт в Excel
+        <button class="btn btn-sm btn-success" onclick="exportToExcel()" id="exportBtn" style="display: none;">
+            <i class="bi bi-download"></i> Экспорт в Excel  
         </button>
     </div>
 </div>
@@ -537,7 +537,6 @@ function exportToExcel() {
 }
 
 // Отображение элементов заказа
-// Отображение элементов заказа
 function displayOrderItems() {
     const tbody = document.getElementById('orderTableBody');
     const statsBadge = document.getElementById('orderStats');
@@ -574,7 +573,10 @@ function displayOrderItems() {
     tbody.innerHTML = currentOrder.items.map((item, index) => {
         const weightClass = getWeightClass(item);
         const priceClass = getPriceClass(item);
-        
+        const priceDateClass = getPriceDateClass(item.sale_price_date);
+        // Объединяем классы для цены продажи
+        const combinedPriceClass = [priceClass, priceDateClass].filter(Boolean).join(' ');
+                
         return `
             <tr>
                 <td>${index + 1}</td>
@@ -585,8 +587,8 @@ function displayOrderItems() {
                     ${item.catalog_weight ? item.catalog_weight.toFixed(3) : 'Нет данных'}
                 </td>
                 <td>${item.quantity}</td>
-                <td class="${priceClass}">
-                    ${item.sale_price ? item.sale_price.toFixed(2) + ' руб.' : 'Нет данных'}
+                <td class="${combinedPriceClass}" title="${getPriceDateTooltip(item.sale_price_date)}">
+                    ${renderSalePrice(item)}
                 </td>
                 ${renderRegionCells(item)}
                 <td>${item.statistics || '-'}</td>
@@ -603,13 +605,74 @@ function displayOrderItems() {
     }).join('');
 }
 
+
+// Функция для отображения цены с датой
+function renderSalePrice(item) {
+    if (!item.sale_price) {
+        return 'Нет данных';
+    }
+    
+    const priceText = item.sale_price.toFixed(2) + ' руб.';
+    
+    if (item.sale_price_date) {
+        const date = new Date(item.sale_price_date);
+        const dateStr = date.toLocaleDateString('ru-RU');
+        return `
+            <div>
+                <strong>${priceText}</strong>
+                <br>
+                <small class="text-muted">${dateStr}</small>
+            </div>
+        `;
+    }
+    
+    return priceText;
+}
+
+
+// Функция для подсказки по дате
+function getPriceDateTooltip(salePriceDate) {
+    if (!salePriceDate) return 'Дата цены не указана';
+    
+    const priceDate = new Date(salePriceDate);
+    const now = new Date();
+    const diffTime = Math.abs(now - priceDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays > 30) {
+        return `Цена установлена ${diffDays} дней назад (старше месяца)`;
+    } else if (diffDays > 14) {
+        return `Цена установлена ${diffDays} дней назад (старше 2 недель)`;
+    }
+    
+    return `Цена установлена ${diffDays} дней назад (актуальная)`;
+}
+
+function getPriceDateClass(salePriceDate) {
+    if (!salePriceDate) return '';
+    
+    const priceDate = new Date(salePriceDate);
+    const now = new Date();
+    const diffTime = Math.abs(now - priceDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays > 30) {
+        return 'table-danger'; // Старше месяца - красный
+    } else if (diffDays > 14) {
+        return 'table-info'; // Старше 2 недель - голубой
+    }
+    return ''; // Актуальная - без подсветки
+}
+
 // Функции для определения классов подсветки
 function getWeightClass(item) {
+//    const displayWeight = item.custom_weight !== undefined ? item.custom_weight : item.catalog_weight;
     if (!item.catalog_weight) return 'table-warning';
     return '';
 }
 
 function getPriceClass(item) {
+//    const displayPrice = item.custom_sale_price !== undefined ? item.custom_sale_price : item.sale_price;
     if (!item.sale_price) return 'table-warning';
     return '';
 }
@@ -709,47 +772,121 @@ function editOrderItem(index) {
 }
 
 // Сохранение позиции
+// Сохранение позиции с обновлением данных
 function saveOrderItem() {
     const index = document.getElementById('editItemIndex').value;
     const brand = document.getElementById('editBrand').value;
     const article = document.getElementById('editArticle').value;
-    const quantity = document.getElementById('editQuantity').value;
+    const quantity = parseInt(document.getElementById('editQuantity').value);
+    const weight = document.getElementById('editWeight').value ? 
+        parseFloat(document.getElementById('editWeight').value) : null;
+    const salePrice = document.getElementById('editSalePrice').value ? 
+        parseFloat(document.getElementById('editSalePrice').value) : null;
+    const updateCatalog = document.getElementById('editUpdateCatalog').checked;
+    const updatePrice = document.getElementById('editUpdatePrice').checked;
+    const partId = document.getElementById('editPartId').value;
     
     if (!brand || !article || !quantity) {
-        alert('Заполните все поля');
+        alert('Заполните обязательные поля (Марка, Артикул, Количество)');
         return;
     }
     
-    // Здесь будет вызов API для поиска детали в каталоге
-    // Пока просто добавляем в локальный массив
-    const newItem = {
-        brand: brand,
-        article: article,
-        quantity: parseInt(quantity),
-        name: 'Загрузка...',
-        catalog_weight: null,
-        sale_price: null,
-        statistics: null,
-        regions: null
-    };
+    // Показываем индикатор загрузки
+    const saveBtn = document.querySelector('[onclick="saveOrderItem()"]');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Сохранение...';
+    saveBtn.disabled = true;
+
+    // Сначала обновляем данные в каталоге если нужно
+    const updatePromises = [];
     
-    if (index === '') {
-        // Новая строка
-        currentOrder.items.push(newItem);
-    } else {
-        // Редактирование существующей
-        currentOrder.items[index] = newItem;
+    if ((updateCatalog && weight !== null) || (updatePrice && salePrice !== null)) {
+        updatePromises.push(
+            fetch('/api/order/update_item', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    brand: brand,
+                    article: article,
+                    weight: weight,
+                    sale_price: salePrice,
+                    update_catalog: updateCatalog,
+                    update_price: updatePrice
+                })
+            })
+        );
     }
     
-    displayOrderItems();
-    
-    // Пересчитываем цены для новой/измененной позиции
-    setTimeout(() => {
-        recalculateOrder();
-    }, 100);
-    
-    bootstrap.Modal.getInstance(document.getElementById('editOrderItemModal')).hide();
+    // Ждем завершения всех обновлений
+    Promise.all(updatePromises)
+        .then(responses => Promise.all(responses.map(r => r.json())))
+        .then(results => {
+            // Проверяем результаты обновления
+            let updateMessage = '';
+            let actualPartId = partId;
+            
+            for (const result of results) {
+                if (result.success) {
+                    updateMessage = result.message;
+                    if (result.part_id) {
+                        actualPartId = result.part_id;
+                    }
+                } else {
+                    console.warn('Ошибка обновления:', result.error);
+                }
+            }
+            
+            // Теперь обновляем данные в текущем заказе
+            const itemData = {
+                brand: brand,
+                article: article,
+                quantity: quantity,
+                part_id: actualPartId,
+                custom_weight: weight,
+                custom_sale_price: salePrice,
+                name: document.getElementById('editName').value || null,
+                // Обновляем основные поля если данные были сохранены в каталог
+                catalog_weight: updateCatalog ? weight : (currentOrder.items[index]?.catalog_weight || null),
+                sale_price: updatePrice ? salePrice : (currentOrder.items[index]?.sale_price || null)
+            };
+            
+            if (index === '') {
+                // Новая строка
+                currentOrder.items.push(itemData);
+            } else {
+                // Редактирование существующей
+                currentOrder.items[index] = itemData;
+            }
+            
+            displayOrderItems();
+            
+            // Пересчитываем цены после сохранения
+            setTimeout(() => {
+                recalculateOrder();
+            }, 100);
+            
+            bootstrap.Modal.getInstance(document.getElementById('editOrderItemModal')).hide();
+            
+            // Показываем сообщение об успешном обновлении
+            if (updateMessage) {
+                setTimeout(() => {
+                    alert(updateMessage);
+                }, 300);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Ошибка при сохранении данных');
+        })
+        .finally(() => {
+            // Восстанавливаем кнопку
+            saveBtn.innerHTML = originalText;
+            saveBtn.disabled = false;
+        });
 }
+
 
 // Поиск детали при изменении бренда или артикула
 function findPart() {
@@ -844,70 +981,6 @@ function editOrderItem(index) {
     document.querySelector('[onclick="deleteOrderItem()"]').style.display = 'inline-block';
     
     new bootstrap.Modal(document.getElementById('editOrderItemModal')).show();
-}
-
-// Сохранение позиции с обновлением данных
-function saveOrderItem() {
-    const index = document.getElementById('editItemIndex').value;
-    const brand = document.getElementById('editBrand').value;
-    const article = document.getElementById('editArticle').value;
-    const quantity = parseInt(document.getElementById('editQuantity').value);
-    const weight = document.getElementById('editWeight').value ? 
-        parseFloat(document.getElementById('editWeight').value) : null;
-    const salePrice = document.getElementById('editSalePrice').value ? 
-        parseFloat(document.getElementById('editSalePrice').value) : null;
-    const updateCatalog = document.getElementById('editUpdateCatalog').checked;
-    const updatePrice = document.getElementById('editUpdatePrice').checked;
-    const partId = document.getElementById('editPartId').value;
-    
-    if (!brand || !article || !quantity) {
-        alert('Заполните обязательные поля (Марка, Артикул, Количество)');
-        return;
-    }
-    
-    const itemData = {
-        brand: brand,
-        article: article,
-        quantity: quantity,
-        part_id: partId || null,
-        custom_weight: weight,
-        custom_sale_price: salePrice,
-        update_catalog: updateCatalog,
-        update_price: updatePrice,
-        name: document.getElementById('editName').value || null
-    };
-    
-    // Если это новая позиция, ищем деталь в каталоге
-    if (!partId) {
-        fetch('/api/order/find_part', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                brand: brand,
-                article: article
-            })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && data.found) {
-                itemData.part_id = data.part_data.id;
-                itemData.name = data.part_data.name;
-                itemData.catalog_weight = data.part_data.weight;
-                saveItemToOrder(index, itemData);
-            } else {
-                // Создаем позицию без привязки к каталогу
-                saveItemToOrder(index, itemData);
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            saveItemToOrder(index, itemData);
-        });
-    } else {
-        saveItemToOrder(index, itemData);
-    }
 }
 
 function saveItemToOrder(index, itemData) {
