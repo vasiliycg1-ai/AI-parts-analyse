@@ -106,6 +106,35 @@
         </div>
     </div>
 </div>
+<!-- После блока коэффициента, перед таблицей -->
+<div class="card mb-4" id="supplierSelectionCard" style="display: none;">
+    <div class="card-header">
+        <h5><i class="bi bi-person-badge"></i> Анализ по конкретному поставщику</h5>
+    </div>
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-6">
+                <label class="form-label">Выберите поставщика</label>
+                <select class="form-select" id="specificSupplierSelect" onchange="calculateSpecificSupplier()">
+                    <option value="">-- Все поставщики --</option>
+                    <!-- Заполнится через JavaScript -->
+                </select>
+            </div>
+            <div class="col-md-4">
+                <div class="form-text">
+                    Будет показана цена и прибыль для выбранного поставщика
+                </div>
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-outline-secondary w-100" onclick="clearSpecificSupplier()">
+                    <i class="bi bi-x-circle"></i> Сбросить
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
 
 <!-- Таблица заказа (изначально скрыта) -->
 <div class="card" id="orderTableCard" style="display: none;">
@@ -141,6 +170,11 @@
                         <th width="10%">Китай</th>
                         <th width="10%">ОАЭ</th>
                         <th width="10%">Япония</th>
+
+        <!-- Конкретный поставщик -->
+        <th width="12%" id="specificSupplierHeader" style="display: none;">
+            Поставщик
+        </th>
                         
                         <th width="10%">Статистика</th>
                         <th width="10%">Действия</th>
@@ -256,6 +290,10 @@ let currentOrder = {
     coefficient: 0.835
 };
 
+
+
+
+
 // Загрузка файла заказа
 document.getElementById('uploadOrderForm').addEventListener('submit', function(e) {
     e.preventDefault();
@@ -322,6 +360,87 @@ document.getElementById('uploadOrderForm').addEventListener('submit', function(e
         alert('Ошибка при загрузке файла');
     });
 });
+
+
+let currentSpecificSupplier = null;
+
+// Загрузка списка поставщиков
+function loadSuppliers() {
+    fetch('/api/suppliers/list')
+        .then(response => response.json())
+        .then(suppliers => {
+            const select = document.getElementById('specificSupplierSelect');
+            select.innerHTML = '<option value="">-- Все поставщики --</option>';
+            
+            suppliers.forEach(supplier => {
+                const option = document.createElement('option');
+                option.value = supplier.id;
+                option.textContent = `${supplier.name} (${supplier.region_name}, ${supplier.currency})`;
+                select.appendChild(option);
+            });
+        })
+        .catch(error => {
+            console.error('Error loading suppliers:', error);
+        });
+}
+
+// Расчет для конкретного поставщика
+function calculateSpecificSupplier() {
+    const supplierId = document.getElementById('specificSupplierSelect').value;
+    
+    if (!supplierId) {
+        clearSpecificSupplier();
+        return;
+    }
+    
+    const coefficient = parseFloat(document.getElementById('coefficientInput').value);
+    
+    fetch('/api/order/calculate_supplier', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            items: currentOrder.items,
+            supplier_id: supplierId,
+            coefficient: coefficient
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            currentOrder.items = data.order_data.items;
+            currentSpecificSupplier = data.order_data.specific_supplier;
+            displayOrderItems();
+            
+            // Показываем заголовок колонки
+            const header = document.getElementById('specificSupplierHeader');
+            header.textContent = currentSpecificSupplier.name;
+            header.style.display = 'table-cell';
+            
+        } else {
+            alert('Ошибка расчета: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ошибка при расчете цен поставщика');
+    });
+}
+
+// Сброс выбора поставщика
+function clearSpecificSupplier() {
+    document.getElementById('specificSupplierSelect').value = '';
+    document.getElementById('specificSupplierHeader').style.display = 'none';
+    currentSpecificSupplier = null;
+    
+    // Убираем данные поставщика из items
+    currentOrder.items.forEach(item => {
+        delete item.specific_supplier;
+    });
+    
+    displayOrderItems();
+}
 
 // Экспорт заказа для поставщика
 function exportForSupplier() {
@@ -647,7 +766,8 @@ function displayOrderItems() {
         document.getElementById('calculationCard').style.display = 'block';
         document.getElementById('exportBtn').style.display = 'inline-block';
         document.getElementById('saveOrderBtn').style.display = 'inline-block';
-        
+        document.getElementById('supplierSelectionCard').style.display = 'block';
+
         // Устанавливаем коэффициент если он есть в заказе
         if (currentOrder.coefficient) {
             document.getElementById('coefficientInput').value = currentOrder.coefficient;
@@ -676,6 +796,7 @@ function displayOrderItems() {
                     ${renderSalePrice(item)}
                 </td>
                 ${renderRegionCells(item)}
+                ${renderSpecificSupplierCell(item)}
                 <td>${item.statistics || '-'}</td>
                 <td>
                     <button class="btn btn-sm btn-outline-primary" onclick="editOrderItem(${index})">
@@ -688,6 +809,76 @@ function displayOrderItems() {
             </tr>
         `;
     }).join('');
+}
+
+// Отрисовка ячейки конкретного поставщика
+function renderSpecificSupplierCell(item) {
+    if (!currentSpecificSupplier || !item.specific_supplier) {
+        return '<td style="display: none;"></td>';
+    }
+    
+    const supplierData = item.specific_supplier;
+    
+    if (!supplierData.has_data) {
+        return '<td class="table-warning">Нет данных</td>';
+    }
+    
+    let cellClass = '';
+    let icon = '';
+    let tooltip = `title="${supplierData.supplier}`;
+    
+//    if (supplierData.profit_percent > 15) {
+//        cellClass = 'table-primary';
+//        tooltip += ' - Высокая прибыль';
+//    } else if (supplierData.profit_percent < 0) {
+//        cellClass = 'table-danger';
+//        tooltip += ' - Убыток';
+//    } else if (supplierData.profit_percent !== null) {
+//        tooltip += ` - Прибыль: ${supplierData.profit_percent}%`;
+//    }
+
+
+    // Цвет по прибыли
+    if (supplierData.profit_percent < 0) {
+        cellClass = 'table-danger';
+        icon = '<i class="bi bi-arrow-down-circle text-danger"></i>';
+        tooltip += ' - УБЫТОК';
+    } else if (supplierData.profit_percent > 20) {
+        cellClass = 'table-success';
+        icon = '<i class="bi bi-arrow-up-circle text-success"></i>';
+        tooltip += ' - Очень высокая прибыль';
+    } else if (supplierData.profit_percent > 10) {
+        cellClass = 'table-primary';
+        icon = '<i class="bi bi-arrow-up-circle text-primary"></i>';
+        tooltip += ' - Хорошая прибыль';
+    } else if (supplierData.profit_percent > 0) {
+        cellClass = 'table-info';
+        icon = '<i class="bi bi-dash-circle text-info"></i>';
+        tooltip += ' - Низкая прибыль';
+    } else {
+        cellClass = '';
+        icon = '<i class="bi bi-dash-circle text-secondary"></i>';
+        tooltip += ' - Безубыточно';
+    }
+    
+    tooltip += `"`;
+    
+    const priceText = supplierData.price_rub ? supplierData.price_rub.toFixed(2) + ' руб.' : '-';
+    const profitText = supplierData.profit_percent !== null ? 
+        `${supplierData.profit_percent}%` : '—';
+
+    
+    return `
+        <td class="${cellClass}" ${tooltip}>
+            <div class="small">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span>${icon}</span>
+                    <strong>${priceText}</strong>
+                </div>
+                <small>${profitText}</small>
+            </div>
+        </td>
+    `;
 }
 
 
@@ -1141,6 +1332,8 @@ function saveOrder() {
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('editBrand').addEventListener('blur', findPart);
     document.getElementById('editArticle').addEventListener('blur', findPart);
+    loadSuppliers();
+
 });
 
 

@@ -265,6 +265,139 @@ def index():
     from datetime import datetime
     return render_template('upload.html', now=datetime.now())
 
+@app.route('/api/order/calculate_supplier', methods=['POST'])
+def api_order_calculate_supplier():
+    """API для расчета цен по конкретному поставщику"""
+    data = request.get_json()
+    order_items = data.get('items', [])
+    supplier_id = data.get('supplier_id')
+    coefficient = float(data.get('coefficient', 0.835))
+    
+    if not supplier_id:
+        return jsonify({'error': 'Supplier ID is required'}), 400
+    
+    conn = get_db_connection()
+    
+    try:
+        # Получаем информацию о поставщике
+        supplier_info = conn.execute('''
+            SELECT s.id, s.name, s.currency, r.name as region_name
+            FROM suppliers s
+            JOIN regions r ON s.region_id = r.id
+            WHERE s.id = ?
+        ''', (supplier_id,)).fetchone()
+        
+        if not supplier_info:
+            return jsonify({'error': 'Supplier not found'}), 404
+        
+        # Получаем курсы валют и стоимость доставки
+        currency_rates = get_currency_rates(conn)
+        delivery_costs = get_delivery_costs(conn)
+        
+        # Рассчитываем цены для выбранного поставщика
+        for item in order_items:
+            supplier_price_data = calculate_supplier_price(
+                item, supplier_info, currency_rates, 
+                delivery_costs, coefficient, conn
+            )
+            item['specific_supplier'] = supplier_price_data
+        
+        return jsonify({
+            'success': True,
+            'order_data': {
+                'items': order_items,
+                'coefficient': coefficient,
+                'specific_supplier': {
+                    'id': supplier_info['id'],
+                    'name': supplier_info['name'],
+                    'currency': supplier_info['currency'],
+                    'region': supplier_info['region_name']
+                }
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'Ошибка расчета: {str(e)}'}), 500
+    finally:
+        conn.close()
+
+def calculate_supplier_price(item, supplier_info, currency_rates, delivery_costs, coefficient, conn):
+    """Рассчитываем цену для конкретного поставщика"""
+    brand_name = item.get('brand', '')
+    article = item.get('article', '')
+    weight = item.get('catalog_weight', 0) or 0
+    
+    # Ищем цену у конкретного поставщика
+    price_data = conn.execute('''
+        SELECT 
+            p.price,
+            pl.upload_date
+        FROM prices p
+        JOIN price_lists pl ON p.price_list_id = pl.id
+        JOIN suppliers s ON pl.supplier_id = s.id
+        JOIN parts_catalog pc ON p.part_id = pc.id
+        JOIN brands b ON pc.brand_id = b.id
+        WHERE b.name = ? AND pc.main_article = ? AND s.id = ? AND pl.is_active = 1
+        ORDER BY pl.upload_date DESC
+        LIMIT 1
+    ''', (brand_name, article, supplier_info['id'])).fetchone()
+    
+    if not price_data:
+        return {
+            'price_original': None,
+            'currency': supplier_info['currency'],
+            'price_rub': None,
+            'supplier': supplier_info['name'],
+            'profit_percent': None,
+            'has_data': False
+        }
+    
+    # Рассчитываем стоимость доставки
+    delivery_cost = calculate_delivery_cost(weight, delivery_costs.get(supplier_info['region_name']))
+    
+    # Конвертируем в рубли
+    price_rub = convert_to_rub(
+        price_data['price'], 
+        supplier_info['currency'], 
+        currency_rates,
+        delivery_cost,
+        coefficient
+    )
+    
+    # Рассчитываем прибыль
+    profit_percent = None
+    sale_price = item.get('sale_price') or item.get('custom_sale_price')
+    if sale_price and price_rub:
+        profit_percent = (sale_price / price_rub - 1) * 100
+    
+    return {
+        'price_original': price_data['price'],
+        'currency': supplier_info['currency'],
+        'price_rub': price_rub,
+        'supplier': supplier_info['name'],
+        'profit_percent': round(profit_percent, 1) if profit_percent else None,
+        'upload_date': price_data['upload_date'],
+        'has_data': True
+    }
+
+@app.route('/api/suppliers/list')
+def api_suppliers_list():
+    """API для получения списка всех поставщиков"""
+    conn = get_db_connection()
+    
+    suppliers = conn.execute('''
+        SELECT s.id, s.name, s.currency, r.name as region_name
+        FROM suppliers s
+        JOIN regions r ON s.region_id = r.id
+        ORDER BY r.name, s.name
+    ''').fetchall()
+    
+    conn.close()
+    
+    return jsonify([dict(supplier) for supplier in suppliers])
+
+
+
 # ================== РЕГИОНЫ ==================
 @app.route('/regions', methods=['GET', 'POST'])
 def manage_regions():
