@@ -81,6 +81,20 @@
                     <i class="bi bi-arrow-clockwise"></i> Пересчитать
                 </button>
             </div>
+<!-- В карточке расчета, рядом с кнопкой пересчета -->
+<div class="col-md-4">
+    <label class="form-label">Экспорт для поставщика</label>
+    <div class="input-group">
+        <select class="form-select" id="supplierRegionSelect">
+            <option value="китай">Китай (USD/CNY)</option>
+            <option value="оаэ">ОАЭ (USD/AED)</option>
+            <option value="япония">Япония (JPY)</option>
+        </select>
+        <button class="btn btn-outline-success" type="button" onclick="exportForSupplier()">
+            <i class="bi bi-download"></i>
+        </button>
+    </div>
+</div>
             <div class="col-md-7">
                 <div class="d-flex gap-2 justify-content-end">
                     <span class="badge bg-success">Лучшая цена</span>
@@ -308,6 +322,73 @@ document.getElementById('uploadOrderForm').addEventListener('submit', function(e
         alert('Ошибка при загрузке файла');
     });
 });
+
+// Экспорт заказа для поставщика
+function exportForSupplier() {
+    if (currentOrder.items.length === 0) {
+        alert('Нет данных для экспорта');
+        return;
+    }
+    
+    const supplierRegion = document.getElementById('supplierRegionSelect').value;
+    
+    // Проверяем есть ли данные по выбранному региону
+    const hasRegionData = currentOrder.items.some(item => {
+        const regionData = item.regions?.[supplierRegion];
+        return regionData && regionData.price_original !== null;
+    });
+    
+    if (!hasRegionData) {
+        alert(`Нет данных по ценам для региона ${supplierRegion}`);
+        return;
+    }
+    
+    // Показываем индикатор загрузки
+    const exportBtn = document.querySelector('[onclick="exportForSupplier()"]');
+    const originalText = exportBtn.innerHTML;
+    exportBtn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+    exportBtn.disabled = true;
+
+    fetch('/api/order/export_supplier_detailed', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            order_data: currentOrder,
+            supplier_region: supplierRegion
+        })
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(data => {
+                throw new Error(data.error || 'Ошибка экспорта');
+            });
+        }
+        return response.blob();
+    })
+    .then(blob => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = `заказ_${supplierRegion}_${new Date().toISOString().slice(0,10)}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        exportBtn.innerHTML = originalText;
+        exportBtn.disabled = false;
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        exportBtn.innerHTML = originalText;
+        exportBtn.disabled = false;
+        alert('Ошибка при экспорте: ' + error.message);
+    });
+}
+
 
 // Загрузка списка сохраненных заказов
 function loadSavedOrders() {

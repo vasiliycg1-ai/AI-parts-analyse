@@ -980,15 +980,16 @@ def calculate_single_region_price(brand_name, article, region_name, weight,
     }
 
 def get_best_region_price(brand_name, article, region_name, conn):
-    """Находим лучшую цену в указанном регионе"""
+    """Находим лучшую цену в указанном регионе (сначала свежие цены от поставщиков, потом минимальную)"""
     query = '''
-    WITH RegionPrices AS (
+    WITH LatestSupplierPrices AS (
+        -- Сначала получаем самые свежие цены от каждого поставщика
         SELECT 
             p.price,
             s.currency,
             s.name as supplier_name,
             pl.upload_date,
-            ROW_NUMBER() OVER (ORDER BY p.price ASC, pl.upload_date DESC) as rn
+            ROW_NUMBER() OVER (PARTITION BY s.id ORDER BY pl.upload_date DESC) as rn
         FROM prices p
         JOIN price_lists pl ON p.price_list_id = pl.id
         JOIN suppliers s ON pl.supplier_id = s.id
@@ -996,12 +997,235 @@ def get_best_region_price(brand_name, article, region_name, conn):
         JOIN parts_catalog pc ON p.part_id = pc.id
         JOIN brands b ON pc.brand_id = b.id
         WHERE b.name = ? AND pc.main_article = ? AND r.name = ? AND pl.is_active = 1
+    ),
+    BestRegionPrice AS (
+        -- Затем выбираем минимальную цену среди свежих цен поставщиков
+        SELECT 
+            price,
+            currency,
+            supplier_name,
+            upload_date,
+            ROW_NUMBER() OVER (ORDER BY price ASC, upload_date DESC) as rn_best
+        FROM LatestSupplierPrices
+        WHERE rn = 1  -- Только самые свежие цены от каждого поставщика
     )
-    SELECT * FROM RegionPrices WHERE rn = 1
+    SELECT * FROM BestRegionPrice WHERE rn_best = 1
     '''
     
     return conn.execute(query, (brand_name, article, region_name)).fetchone()
 
+@app.route('/api/order/export_supplier', methods=['POST'])
+def api_order_export_supplier():
+    """API для экспорта заказа для поставщиков в их валюте"""
+    data = request.get_json()
+    order_data = data.get('order_data', {})
+    supplier_region = data.get('supplier_region', 'Китай')  # По умолчанию Китай
+    
+    try:
+        conn = get_db_connection()
+        
+        # Получаем курсы валют
+        currency_rates = get_currency_rates(conn)
+        
+        # Создаем DataFrame для экспорта
+        export_data = []
+        
+        for item in order_data.get('items', []):
+            region_data = item.get('regions', {}).get(supplier_region, {})
+            
+            if not region_data or region_data.get('price_original') is None:
+                continue  # Пропускаем позиции без данных по выбранному региону
+            
+            # Получаем валюту региона
+            currency = region_data.get('currency', 'USD')
+            price_original = region_data.get('price_original')
+            supplier_name = region_data.get('supplier', '')
+            
+            # Форматируем для поставщика
+            row = {
+                'Марка': item.get('brand', ''),
+                'Артикул': item.get('article', ''),
+                'Название': item.get('name', ''),
+                'Количество': item.get('quantity', 0),
+                f'Цена_({currency})': price_original,
+                'Поставщик': supplier_name,
+                'Вес_кг': item.get('catalog_weight') or item.get('custom_weight')
+            }
+            
+            # Добавляем расчетную стоимость доставки если нужно
+            weight = item.get('catalog_weight') or item.get('custom_weight')
+            if weight:
+                delivery_cost = calculate_delivery_cost(weight, get_delivery_costs(conn).get(supplier_region))
+                row['Доставка_руб'] = delivery_cost
+            
+            export_data.append(row)
+        
+        conn.close()
+        
+        if not export_data:
+            return jsonify({'error': f'Нет данных по региону {supplier_region}'}), 400
+        
+        # Создаем DataFrame
+        df = pd.DataFrame(export_data)
+        
+        # Создаем Excel файл в памяти
+        output = BytesIO()
+        
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Заказ_поставщику', index=False)
+            
+            workbook = writer.book
+            worksheet = writer.sheets['Заказ_поставщику']
+            
+            # Настраиваем ширину колонок
+            column_widths = {
+                'A': 15, 'B': 20, 'C': 35, 'D': 12, 'E': 15, 'F': 25, 'G': 10, 'H': 15
+            }
+            
+            for col, width in column_widths.items():
+                worksheet.column_dimensions[col].width = width
+            
+            # Добавляем заголовки
+            worksheet.insert_rows(1, 4)
+            worksheet['A1'] = f"ЗАКАЗ ДЛЯ ПОСТАВЩИКА: {supplier_region}"
+            worksheet['A2'] = f"Дата формирования: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+            worksheet['A3'] = f"Курс валют: {', '.join([f'{curr}: {rate}' for curr, rate in currency_rates.items()])}"
+            worksheet['A4'] = "ВСЕ ЦЕНЫ УКАЗАНЫ В ВАЛЮТЕ ПОСТАВЩИКА"
+        
+        output.seek(0)
+        
+        filename = f"заказ_{supplier_region}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        print(f"Supplier export error: {str(e)}")
+        return jsonify({'error': f'Ошибка экспорта: {str(e)}'}), 500
+    
+@app.route('/api/order/export_supplier_detailed', methods=['POST'])
+def api_order_export_supplier_detailed():
+    """Расширенный экспорт с расчетом сумм"""
+    data = request.get_json()
+    order_data = data.get('order_data', {})
+    supplier_region = data.get('supplier_region', 'Китай')
+    
+    try:
+        conn = get_db_connection()
+        currency_rates = get_currency_rates(conn)
+        
+        export_data = []
+        total_quantity = 0
+        total_value_original = 0
+        total_value_rub = 0
+        
+        for item in order_data.get('items', []):
+            region_data = item.get('regions', {}).get(supplier_region, {})
+            
+            if not region_data or region_data.get('price_original') is None:
+                continue
+            
+            currency = region_data.get('currency', 'USD')
+            price_original = region_data.get('price_original')
+            price_rub = region_data.get('price_rub')
+            quantity = item.get('quantity', 0)
+            supplier_name = region_data.get('supplier', '')
+            
+            # Рассчитываем суммы
+            item_value_original = price_original * quantity
+            item_value_rub = price_rub * quantity if price_rub else None
+            
+            total_quantity += quantity
+            total_value_original += item_value_original
+            total_value_rub += item_value_rub if item_value_rub else 0
+            
+            row = {
+                'Марка': item.get('brand', ''),
+                'Артикул': item.get('article', ''),
+                'Название': item.get('name', ''),
+                'Количество': quantity,
+                f'Цена_({currency})': round(price_original, 2),
+                f'Сумма_({currency})': round(item_value_original, 2),
+                'Цена_руб': round(price_rub, 2) if price_rub else '',
+                'Сумма_руб': round(item_value_rub, 2) if item_value_rub else '',
+                'Поставщик': supplier_name,
+                'Вес_кг': item.get('catalog_weight') or item.get('custom_weight')
+            }
+            
+            export_data.append(row)
+        
+        conn.close()
+        
+        if not export_data:
+            return jsonify({'error': f'Нет данных по региону {supplier_region}'}), 400
+        
+        # Добавляем итоговую строку
+        if export_data:
+            export_data.append({
+                'Марка': 'ИТОГО:',
+                'Артикул': '',
+                'Название': '',
+                'Количество': total_quantity,
+                f'Цена_({currency})': '',
+                f'Сумма_({currency})': round(total_value_original, 2),
+                'Цена_руб': '',
+                'Сумма_руб': round(total_value_rub, 2),
+                'Поставщик': '',
+                'Вес_кг': ''
+            })
+        
+        # Создаем DataFrame
+        df = pd.DataFrame(export_data)
+        
+        output = BytesIO()
+        
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Заказ_поставщику', index=False)
+            
+            workbook = writer.book
+            worksheet = writer.sheets['Заказ_поставщику']
+            
+            # Настраиваем ширину колонок
+            column_widths = {
+                'A': 15, 'B': 20, 'C': 35, 'D': 12, 'E': 15, 'F': 15, 
+                'G': 15, 'H': 15, 'I': 25, 'J': 10
+            }
+            
+            for col, width in column_widths.items():
+                worksheet.column_dimensions[col].width = width
+            
+            # Добавляем заголовки и форматируем итоговую строку
+            worksheet.insert_rows(1, 5)
+            worksheet['A1'] = f"КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ: {supplier_region}"
+            worksheet['A2'] = f"Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+            worksheet['A3'] = f"Курсы валют: {', '.join([f'{curr}: {rate}' for curr, rate in currency_rates.items()])}"
+            worksheet['A4'] = f"Общая сумма: {round(total_value_original, 2)} {currency} ≈ {round(total_value_rub, 2)} руб."
+            worksheet['A5'] = "ВСЕ ЦЕНЫ УКАЗАНЫ В ВАЛЮТЕ ПОСТАВЩИКА"
+            
+            # Выделяем итоговую строку жирным
+            if len(export_data) > 0:
+                last_row = len(export_data) + 6  # +5 из-за заголовков
+                for col in 'ABCDEFGHIJ':
+                    cell = f"{col}{last_row}"
+                    worksheet[cell].font = Font(bold=True)
+        
+        output.seek(0)
+        
+        filename = f"коммерческое_предложение_{supplier_region}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        print(f"Detailed supplier export error: {str(e)}")
+        return jsonify({'error': f'Ошибка экспорта: {str(e)}'}), 500
+    
 def calculate_delivery_cost(weight, delivery_data):
     """Рассчитываем стоимость доставки"""
     if not delivery_data:
