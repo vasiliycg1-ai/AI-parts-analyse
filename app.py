@@ -1274,7 +1274,7 @@ def api_order_find_part():
         
         # Ищем цену продажи
         sale_price_data = conn.execute('''
-            SELECT esp.price_rub
+            SELECT esp.price_rub, effective_date
             FROM expected_sale_prices esp
             JOIN parts_catalog pc ON esp.part_id = pc.id
             JOIN brands b ON pc.brand_id = b.id
@@ -1299,7 +1299,9 @@ def api_order_find_part():
                 'article': part_data['main_article'],
                 'name': part_data['name_ru'],
                 'weight': part_data['weight'],
-                'sale_price': sale_price_data['price_rub'] if sale_price_data else None
+                'sale_price': sale_price_data['price_rub'] if sale_price_data else None,
+                'sale_price_date': sale_price_data['effective_date'] if sale_price_data else None,
+
             }
         })
         
@@ -1311,7 +1313,7 @@ def api_order_find_part():
         
 @app.route('/api/order/export', methods=['POST'])
 def api_order_export():
-    """API для экспорта заказа в Excel"""
+    """API для экспорта заказа в Excel с датами цен"""
     data = request.get_json()
     order_data = data.get('order_data', {})
     
@@ -1320,6 +1322,18 @@ def api_order_export():
         export_data = []
         
         for item in order_data.get('items', []):
+            # Форматируем дату цены
+            price_date = item.get('sale_price_date')
+            if price_date:
+                try:
+                    price_date_str = datetime.strptime(price_date, '%Y-%m-%d').strftime('%d.%m.%Y')
+                    days_ago = (datetime.now() - datetime.strptime(price_date, '%Y-%m-%d')).days
+                    price_date_display = f"{price_date_str} ({days_ago} дн. назад)"
+                except:
+                    price_date_display = price_date
+            else:
+                price_date_display = 'Нет данных'
+            
             row = {
                 'Марка': item.get('brand', ''),
                 'Артикул': item.get('article', ''),
@@ -1327,12 +1341,13 @@ def api_order_export():
                 'Вес_кг': item.get('catalog_weight') or item.get('custom_weight'),
                 'Количество': item.get('quantity', 0),
                 'Цена_продажи_руб': item.get('sale_price') or item.get('custom_sale_price'),
+                'Дата_цены_продажи': price_date_display,
                 'Статистика': item.get('statistics', '')
             }
             
             # Добавляем данные по регионам
             regions = item.get('regions', {})
-            for region_name in ['китай', 'ОАЭ', 'Япония']:
+            for region_name in ['китай', 'оаэ', 'япония']:
                 region_data = regions.get(region_name, {})
                 row[f'Цена_{region_name}_руб'] = region_data.get('price_rub')
                 row[f'Прибыль_{region_name}_%'] = region_data.get('profit_percent')
@@ -1345,6 +1360,7 @@ def api_order_export():
         
         # Создаем Excel файл в памяти
         output = BytesIO()
+        
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, sheet_name='Заказ', index=False)
             
@@ -1354,21 +1370,19 @@ def api_order_export():
             
             # Настраиваем ширину колонок
             column_widths = {
-                'A': 15, 'B': 20, 'C': 30, 'D': 10, 'E': 12, 'F': 15, 'G': 15,
-                'H': 15, 'I': 15, 'J': 15, 'K': 15, 'L': 15, 'M': 15, 'N': 20, 'O': 20, 'P': 20
+                'A': 15, 'B': 20, 'C': 30, 'D': 10, 'E': 12, 'F': 15, 'G': 20, 'H': 15,
+                'I': 15, 'J': 15, 'K': 15, 'L': 15, 'M': 15, 'N': 15, 'O': 20, 'P': 20, 'Q': 20
             }
             
             for col, width in column_widths.items():
                 worksheet.column_dimensions[col].width = width
             
-            # Сдвигаем таблицу вниз на 3 строки
-            worksheet.insert_rows(1, 3)
-
             # Добавляем заголовки
-            worksheet['A1'].value = f"Заказ: {order_data.get('name', 'Без названия')}"
-            worksheet['A2'].value = f"Коэффициент: {order_data.get('coefficient', 0.835)}"
-            worksheet['A3'].value = f"Дата экспорта: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-            
+            worksheet.insert_rows(1, 4)
+            worksheet['A1'] = f"Заказ: {order_data.get('name', 'Без названия')}"
+            worksheet['A2'] = f"Коэффициент: {order_data.get('coefficient', 0.835)}"
+            worksheet['A3'] = f"Дата экспорта: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+            worksheet['A4'] = "Цветовая маркировка: 🔵 - цена старше 2 недель, 🔴 - старше месяца"
         
         output.seek(0)
         
@@ -1382,8 +1396,8 @@ def api_order_export():
         )
         
     except Exception as e:
-        return jsonify({'error': f'Ошибка экспорта: {str(e)}'}), 500
-        
+        print(f"Export error: {str(e)}")
+        return jsonify({'error': f'Ошибка экспорта: {str(e)}'}), 500        
 
 # ================== ПОСТАВЩИКИ ==================
 @app.route('/suppliers', methods=['GET', 'POST'])

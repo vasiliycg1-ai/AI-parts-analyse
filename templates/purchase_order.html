@@ -194,11 +194,15 @@
                             <input type="number" step="0.001" class="form-control" id="editWeight">
                             <div class="form-text">Из каталога: <span id="catalogWeightText">-</span></div>
                         </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Цена продажи (руб)</label>
-                            <input type="number" step="0.01" class="form-control" id="editSalePrice">
-                            <div class="form-text">Текущая: <span id="currentPriceText">-</span></div>
-                        </div>
+<div class="col-md-4">
+    <label class="form-label">Цена продажи (руб)</label>
+    <input type="number" step="0.01" class="form-control" id="editSalePrice">
+    <div class="form-text">
+        Текущая: <span id="currentPriceText">-</span>
+        <br>
+        Дата: <span id="currentPriceDate">-</span>
+    </div>
+</div>
                         <div class="col-12">
                             <label class="form-label">Название детали</label>
                             <input type="text" class="form-control" id="editName" readonly>
@@ -892,7 +896,7 @@ function saveOrderItem() {
 function findPart() {
     const brand = document.getElementById('editBrand').value;
     const article = document.getElementById('editArticle').value;
-    
+
     if (!brand || !article) {
         return;
     }
@@ -911,6 +915,11 @@ function findPart() {
     .then(data => {
         if (data.success && data.found) {
             const part = data.part_data;
+
+    const priceDate = part.sale_price_date ? 
+        new Date(part.sale_price_date).toLocaleDateString('ru-RU') : 'Нет данных';
+    document.getElementById('currentPriceDate').textContent = priceDate;
+
             document.getElementById('editPartId').value = part.id;
             document.getElementById('editName').value = part.name || '-';
             document.getElementById('catalogWeightText').textContent = 
@@ -961,6 +970,9 @@ function addManualRow() {
 
 function editOrderItem(index) {
     const item = currentOrder.items[index];
+    const priceDate = item.sale_price_date ? 
+        new Date(item.sale_price_date).toLocaleDateString('ru-RU') : 'Нет данных';
+    document.getElementById('currentPriceDate').textContent = priceDate;
     document.getElementById('editModalTitle').textContent = 'Редактирование позиции';
     document.getElementById('editItemIndex').value = index;
     document.getElementById('editPartId').value = item.part_id || '';
@@ -974,7 +986,7 @@ function editOrderItem(index) {
         item.catalog_weight ? item.catalog_weight.toFixed(3) + ' кг' : 'Нет данных';
     document.getElementById('currentPriceText').textContent = 
         item.sale_price ? item.sale_price.toFixed(2) + ' руб.' : 'Нет данных';
-    document.getElementById('editUpdateCatalog').checked = false;
+    document.getElementById('editUpdateCatalog').checked = true;
     document.getElementById('editUpdatePrice').checked = false;
     
     // Показываем кнопку удаления для существующей строки
