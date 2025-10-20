@@ -1002,23 +1002,28 @@ def api_order_save():
         ''', (order_name, coefficient))
         order_id = cursor.lastrowid
         
-        # Сохраняем позиции заказа и обновляем данные
+        # Сохраняем ВСЕ позиции заказа
+        saved_count = 0
         for item in order_items:
-            part_id = item.get('part_id')
+            # Находим part_id для детали
+            part_id = find_part_id(item.get('brand'), item.get('article'), conn)
+            
+            if not part_id:
+                # Если деталь не найдена, пропускаем или создаем?
+                continue
+            
             quantity = item.get('quantity', 1)
             custom_weight = item.get('custom_weight')
             custom_sale_price = item.get('custom_sale_price')
             update_catalog = item.get('update_catalog', False)
             update_price = item.get('update_price', False)
             
-            if not part_id:
-                continue
-            
             # Сохраняем позицию заказа
             conn.execute('''
                 INSERT INTO order_items (order_id, part_id, quantity, custom_weight, custom_sale_price)
                 VALUES (?, ?, ?, ?, ?)
             ''', (order_id, part_id, quantity, custom_weight, custom_sale_price))
+            saved_count += 1
             
             # Обновляем каталог если нужно
             if update_catalog and custom_weight is not None:
@@ -1040,7 +1045,8 @@ def api_order_save():
         return jsonify({
             'success': True,
             'order_id': order_id,
-            'message': f'Заказ "{order_name}" успешно сохранен'
+            'saved_count': saved_count,
+            'message': f'Заказ "{order_name}" успешно сохранен ({saved_count} позиций)'
         })
         
     except Exception as e:
@@ -1049,6 +1055,123 @@ def api_order_save():
     finally:
         conn.close()
 
+def find_part_id(brand_name, article, conn):
+    """Находит part_id по бренду и артикулу"""
+    if not brand_name or not article:
+        return None
+    
+    part_data = conn.execute('''
+        SELECT pc.id
+        FROM parts_catalog pc
+        JOIN brands b ON pc.brand_id = b.id
+        WHERE b.name = ? AND pc.main_article = ?
+    ''', (brand_name, article)).fetchone()
+    
+    return part_data['id'] if part_data else None
+
+@app.route('/api/orders/list')
+def api_orders_list():
+    """API для получения списка сохраненных заказов"""
+    conn = get_db_connection()
+    
+    try:
+        orders = conn.execute('''
+            SELECT 
+                po.id,
+                po.order_name,
+                po.order_date,
+                po.coefficient,
+                po.created_at,
+                COUNT(oi.id) as items_count
+            FROM purchase_orders po
+            LEFT JOIN order_items oi ON po.id = oi.order_id
+            GROUP BY po.id
+            ORDER BY po.created_at DESC
+        ''').fetchall()
+        
+        return jsonify({
+            'success': True,
+            'orders': [dict(order) for order in orders]
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'Ошибка загрузки: {str(e)}'}), 500
+    finally:
+        conn.close()
+
+@app.route('/api/order/load/<int:order_id>')
+def api_order_load(order_id):
+    """API для загрузки сохраненного заказа"""
+    conn = get_db_connection()
+    
+    try:
+        # Получаем основную информацию о заказе
+        order_info = conn.execute('''
+            SELECT * FROM purchase_orders WHERE id = ?
+        ''', (order_id,)).fetchone()
+        
+        if not order_info:
+            return jsonify({'error': 'Заказ не найден'}), 404
+        
+        # Получаем позиции заказа
+        order_items = conn.execute('''
+            SELECT 
+                oi.*,
+                b.name as brand_name,
+                pc.main_article,
+                pc.name_ru,
+                pc.weight as catalog_weight
+            FROM order_items oi
+            JOIN parts_catalog pc ON oi.part_id = pc.id
+            JOIN brands b ON pc.brand_id = b.id
+            WHERE oi.order_id = ?
+        ''', (order_id,)).fetchall()
+        
+        print(f"DEBUG: Загружен заказ {order_id}, позиций: {len(order_items)}")  # Отладочная информация
+        
+        # Формируем данные для фронтенда
+        items_data = []
+        for item in order_items:
+            # Ищем актуальную цену продажи
+            sale_price_data = conn.execute('''
+                SELECT price_rub 
+                FROM expected_sale_prices 
+                WHERE part_id = ? 
+                ORDER BY effective_date DESC 
+                LIMIT 1
+            ''', (item['part_id'],)).fetchone()
+            
+            item_data = {
+                'brand': item['brand_name'],
+                'article': item['main_article'],
+                'name': item['name_ru'],
+                'catalog_weight': item['catalog_weight'],
+                'custom_weight': item['custom_weight'],
+                'quantity': item['quantity'],
+                'sale_price': sale_price_data['price_rub'] if sale_price_data else None,
+                'custom_sale_price': item['custom_sale_price'],
+                'part_id': item['part_id']
+            }
+            
+            items_data.append(item_data)
+            print(f"DEBUG: Позиция - {item['brand_name']} {item['main_article']}")  # Отладочная информация
+        
+        return jsonify({
+            'success': True,
+            'order_data': {
+                'name': order_info['order_name'] + ' (загружен)',
+                'items': items_data,
+                'coefficient': order_info['coefficient'],
+                'original_order_id': order_id
+            }
+        })
+        
+    except Exception as e:
+        print(f"DEBUG: Ошибка загрузки заказа {order_id}: {str(e)}")  # Отладочная информация
+        return jsonify({'error': f'Ошибка загрузки: {str(e)}'}), 500
+    finally:
+        conn.close()    
+    
 @app.route('/api/order/find_part', methods=['POST'])
 def api_order_find_part():
     """API для поиска детали по бренду и артикулу"""
