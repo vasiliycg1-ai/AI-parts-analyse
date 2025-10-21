@@ -151,6 +151,9 @@
         <button class="btn btn-sm btn-success" onclick="exportToExcel()" id="exportBtn" style="display: none;">
             <i class="bi bi-download"></i> Экспорт в Excel  
         </button>
+    <button class="btn btn-sm btn-info me-2" onclick="exportSpecificSupplier()" id="exportSpecificSupplierBtn" style="display: none;">
+        <i class="bi bi-download"></i> Экспорт поставщика
+    </button>
     </div>
 </div>
     <div class="card-body">
@@ -417,6 +420,10 @@ function calculateSpecificSupplier() {
             const header = document.getElementById('specificSupplierHeader');
             header.textContent = currentSpecificSupplier.name;
             header.style.display = 'table-cell';
+            // ПОКАЗЫВАЕМ КНОПКУ ЭКСПОРТА ПОСТАВЩИКА
+            document.getElementById('exportSpecificSupplierBtn').style.display = 'inline-block';
+            
+
             
         } else {
             alert('Ошибка расчета: ' + data.error);
@@ -432,6 +439,7 @@ function calculateSpecificSupplier() {
 function clearSpecificSupplier() {
     document.getElementById('specificSupplierSelect').value = '';
     document.getElementById('specificSupplierHeader').style.display = 'none';
+    document.getElementById('exportSpecificSupplierBtn').style.display = 'none'; // Скрываем кнопку
     currentSpecificSupplier = null;
     
     // Убираем данные поставщика из items
@@ -440,6 +448,73 @@ function clearSpecificSupplier() {
     });
     
     displayOrderItems();
+}
+
+// Экспорт заказа с ценами конкретного поставщика
+function exportSpecificSupplier() {
+    if (currentOrder.items.length === 0) {
+        alert('Нет данных для экспорта');
+        return;
+    }
+    
+    if (!currentSpecificSupplier) {
+        alert('Сначала выберите поставщика для анализа');
+        return;
+    }
+    
+    // Проверяем, что есть данные по поставщику
+    const hasSupplierData = currentOrder.items.some(item => 
+        item.specific_supplier && item.specific_supplier.has_data
+    );
+    
+    if (!hasSupplierData) {
+        alert('Нет данных по ценам выбранного поставщика');
+        return;
+    }
+    
+    // Показываем индикатор загрузки
+    const exportBtn = document.getElementById('exportSpecificSupplierBtn');
+    const originalText = exportBtn.innerHTML;
+    exportBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Экспорт...';
+    exportBtn.disabled = true;
+
+    fetch('/api/order/export_specific_supplier', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            order_data: currentOrder
+        })
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(data => {
+                throw new Error(data.error || 'Ошибка экспорта');
+            });
+        }
+        return response.blob();
+    })
+    .then(blob => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = `заказ_${currentSpecificSupplier.name}_${new Date().toISOString().slice(0,10)}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        exportBtn.innerHTML = originalText;
+        exportBtn.disabled = false;
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        exportBtn.innerHTML = originalText;
+        exportBtn.disabled = false;
+        alert('Ошибка при экспорте: ' + error.message);
+    });
 }
 
 // Экспорт заказа для поставщика
@@ -843,15 +918,15 @@ function renderSpecificSupplierCell(item) {
         cellClass = 'table-danger';
         icon = '<i class="bi bi-arrow-down-circle text-danger"></i>';
         tooltip += ' - УБЫТОК';
-    } else if (supplierData.profit_percent > 20) {
+    } else if (supplierData.profit_percent > 50) {
         cellClass = 'table-success';
         icon = '<i class="bi bi-arrow-up-circle text-success"></i>';
         tooltip += ' - Очень высокая прибыль';
-    } else if (supplierData.profit_percent > 10) {
+    } else if (supplierData.profit_percent > 25) {
         cellClass = 'table-primary';
         icon = '<i class="bi bi-arrow-up-circle text-primary"></i>';
         tooltip += ' - Хорошая прибыль';
-    } else if (supplierData.profit_percent > 0) {
+    } else if (supplierData.profit_percent > 10) {
         cellClass = 'table-info';
         icon = '<i class="bi bi-dash-circle text-info"></i>';
         tooltip += ' - Низкая прибыль';
@@ -960,7 +1035,7 @@ function renderRegionCells(item) {
     
     regions.forEach(region => {
         const regionData = item.regions?.[region];
-        console.log(`Регион ${region}:`, regionData); // ОТЛАДКА
+//        console.log(`Регион ${region}:`, regionData); // ОТЛАДКА
         html += renderSingleRegion(regionData, item.sale_price);
     });
     
@@ -982,15 +1057,15 @@ function renderSingleRegion(regionData, salePrice, regionName) {
         cellClass = 'table-danger';
         icon = '<i class="bi bi-arrow-down-circle text-danger"></i>';
         tooltip += ' - УБЫТОК';
-    } else if (profit > 20) {
+    } else if (profit > 50) {
         cellClass = 'table-success';
         icon = '<i class="bi bi-arrow-up-circle text-success"></i>';
         tooltip += ' - Очень высокая прибыль';
-    } else if (profit > 10) {
+    } else if (profit > 25) {
         cellClass = 'table-primary';
         icon = '<i class="bi bi-arrow-up-circle text-primary"></i>';
         tooltip += ' - Хорошая прибыль';
-    } else if (profit > 0) {
+    } else if (profit > 10) {
         cellClass = 'table-info';
         icon = '<i class="bi bi-dash-circle text-info"></i>';
         tooltip += ' - Низкая прибыль';

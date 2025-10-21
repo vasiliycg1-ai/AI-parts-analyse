@@ -1358,6 +1358,130 @@ def api_order_export_supplier_detailed():
     except Exception as e:
         print(f"Detailed supplier export error: {str(e)}")
         return jsonify({'error': f'Ошибка экспорта: {str(e)}'}), 500
+
+@app.route('/api/order/export_specific_supplier', methods=['POST'])
+def api_order_export_specific_supplier():
+    """API для экспорта заказа с ценами конкретного поставщика"""
+    data = request.get_json()
+    order_data = data.get('order_data', {})
+    
+    try:
+        conn = get_db_connection()
+        currency_rates = get_currency_rates(conn)
+        
+        export_data = []
+        total_quantity = 0
+        total_value_original = 0
+        total_value_rub = 0
+        
+        for item in order_data.get('items', []):
+            supplier_data = item.get('specific_supplier', {})
+            
+            # Пропускаем позиции без данных по выбранному поставщику
+            if not supplier_data or not supplier_data.get('has_data'):
+                continue
+            
+            currency = supplier_data.get('currency', 'USD')
+            price_original = supplier_data.get('price_original')
+            price_rub = supplier_data.get('price_rub')
+            quantity = item.get('quantity', 0)
+            supplier_name = supplier_data.get('supplier', '')
+            
+            # Рассчитываем суммы
+            item_value_original = price_original * quantity
+            item_value_rub = price_rub * quantity if price_rub else None
+            
+            total_quantity += quantity
+            total_value_original += item_value_original
+            total_value_rub += item_value_rub if item_value_rub else 0
+            
+            row = {
+                'Марка': item.get('brand', ''),
+                'Артикул': item.get('article', ''),
+                'Название': item.get('name', ''),
+                'Количество': quantity,
+                f'Цена_({currency})': round(price_original, 2),
+                f'Сумма_({currency})': round(item_value_original, 2),
+                'Цена_руб': round(price_rub, 2) if price_rub else '',
+                'Сумма_руб': round(item_value_rub, 2) if item_value_rub else '',
+                'Поставщик': supplier_name,
+                'Вес_кг': item.get('catalog_weight') or item.get('custom_weight'),
+                'Прибыль_%': supplier_data.get('profit_percent', '')
+            }
+            
+            export_data.append(row)
+        
+        conn.close()
+        
+        if not export_data:
+            return jsonify({'error': 'Нет данных по выбранному поставщику'}), 400
+        
+        # Добавляем итоговую строку
+        if export_data:
+            export_data.append({
+                'Марка': 'ИТОГО:',
+                'Артикул': '',
+                'Название': '',
+                'Количество': total_quantity,
+                f'Цена_({currency})': '',
+                f'Сумма_({currency})': round(total_value_original, 2),
+                'Цена_руб': '',
+                'Сумма_руб': round(total_value_rub, 2),
+                'Поставщик': '',
+                'Вес_кг': '',
+                'Прибыль_%': ''
+            })
+        
+        # Создаем DataFrame
+        df = pd.DataFrame(export_data)
+        
+        output = BytesIO()
+        
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Заказ_поставщику', index=False)
+            
+            workbook = writer.book
+            worksheet = writer.sheets['Заказ_поставщику']
+            
+            # Настраиваем ширину колонок
+            column_widths = {
+                'A': 15, 'B': 20, 'C': 35, 'D': 12, 'E': 15, 'F': 15, 
+                'G': 15, 'H': 15, 'I': 25, 'J': 10, 'K': 12
+            }
+            
+            for col, width in column_widths.items():
+                worksheet.column_dimensions[col].width = width
+            
+            # Добавляем заголовки и форматируем итоговую строку
+            worksheet.insert_rows(1, 5)
+            worksheet['A1'] = f"КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ: {supplier_name}"
+            worksheet['A2'] = f"Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+            worksheet['A3'] = f"Курсы валют: {', '.join([f'{curr}: {rate}' for curr, rate in currency_rates.items()])}"
+            worksheet['A4'] = f"Общая сумма: {round(total_value_original, 2)} {currency} ≈ {round(total_value_rub, 2)} руб."
+            worksheet['A5'] = f"Коэффициент: {order_data.get('coefficient', 0.835)}"
+            
+            # Выделяем итоговую строку жирным
+            if len(export_data) > 0:
+                last_row = len(export_data) + 6  # +5 из-за заголовков
+                for col in 'ABCDEFGHIJK':
+                    cell = f"{col}{last_row}"
+                    worksheet[cell].font = Font(bold=True)
+        
+        output.seek(0)
+        
+        filename = f"заказ_{supplier_name}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        print(f"Specific supplier export error: {str(e)}")
+        return jsonify({'error': f'Ошибка экспорта: {str(e)}'}), 500
+
+    
     
 def calculate_delivery_cost(weight, delivery_data):
     """Рассчитываем стоимость доставки"""
