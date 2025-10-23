@@ -132,12 +132,8 @@
     <div class="mb-3">
         <label class="form-label">Файл с продажами</label>
         <input type="file" class="form-control file-input" accept=".xlsx,.xls" required>
-        <div class="form-text">
-            Колонки: Артикул, Марка, Период, Количество
-        </div>
+        <div class="form-text">Колонки: Артикул, Марка, Период, Количество</div>
     </div>
-    
-    <!-- КНОПКИ ПРОВЕРКИ И ЗАГРУЗКИ -->
     <div class="row g-2">
         <div class="col-6">
             <button type="button" class="btn btn-outline-primary w-100 validate-btn">
@@ -150,38 +146,53 @@
             </button>
         </div>
     </div>
-</form>                            </div>
+</form>
+</div>
                             
                             <!-- Продажи конкурентов -->
                             <div class="tab-pane fade" id="competitorTab">
-                                <form class="upload-form" data-type="competitor_sales">
-                                    <div class="mb-3">
-                                        <label class="form-label">Файл с данными конкурентов</label>
-                                        <input type="file" class="form-control" accept=".xlsx,.xls" required>
-                                        <div class="form-text">
-                                            Колонки: Артикул, Марка, Период, Количество, Источник
-                                        </div>
-                                    </div>
-                                    <button type="submit" class="btn btn-warning w-100">
-                                        <i class="bi bi-upload"></i> Загрузить данные конкурентов
-                                    </button>
-                                </form>
-                            </div>
+<form class="upload-form" data-type="competitor_sales">
+    <div class="mb-3">
+        <label class="form-label">Файл с данными конкурентов</label>
+        <input type="file" class="form-control file-input" accept=".xlsx,.xls" required>
+        <div class="form-text">Колонки: Артикул, Марка, Период, Количество, Источник</div>
+    </div>
+    <div class="row g-2">
+        <div class="col-6">
+            <button type="button" class="btn btn-outline-primary w-100 validate-btn">
+                <i class="bi bi-search"></i> Проверить файл
+            </button>
+        </div>
+        <div class="col-6">
+            <button type="submit" class="btn btn-warning w-100 upload-btn">
+                <i class="bi bi-upload"></i> Загрузить данные конкурентов
+            </button>
+        </div>
+    </div>
+</form>                            
+</div>
                             
                             <!-- Аналитический центр -->
                             <div class="tab-pane fade" id="analyticsTab">
-                                <form class="upload-form" data-type="analytics_center">
-                                    <div class="mb-3">
-                                        <label class="form-label">Файл аналитики</label>
-                                        <input type="file" class="form-control" accept=".xlsx,.xls" required>
-                                        <div class="form-text">
-                                            Колонки: Артикул, Марка, Период, Группа, Запросы
-                                        </div>
-                                    </div>
-                                    <button type="submit" class="btn btn-info w-100">
-                                        <i class="bi bi-upload"></i> Загрузить аналитику
-                                    </button>
-                                </form>
+<form class="upload-form" data-type="analytics_center">
+    <div class="mb-3">
+        <label class="form-label">Файл аналитики</label>
+        <input type="file" class="form-control file-input" accept=".xlsx,.xls" required>
+        <div class="form-text">Колонки: Артикул, Марка, Период, Группа, Запросы</div>
+    </div>
+    <div class="row g-2">
+        <div class="col-6">
+            <button type="button" class="btn btn-outline-primary w-100 validate-btn">
+                <i class="bi bi-search"></i> Проверить файл
+            </button>
+        </div>
+        <div class="col-6">
+            <button type="submit" class="btn btn-info w-100 upload-btn">
+                <i class="bi bi-upload"></i> Загрузить аналитику
+            </button>
+        </div>
+    </div>
+</form>
                             </div>
                         </div>
                         
@@ -395,6 +406,7 @@ function setupUploadForms() {
 }
 
 // Загрузка файла
+// Загрузка файла
 function uploadStatistics(file, dataType) {
     if (!file) {
         alert('Выберите файл для загрузки');
@@ -405,6 +417,18 @@ function uploadStatistics(file, dataType) {
     formData.append('file', file);
     formData.append('data_type', dataType);
 
+    // Показываем индикатор загрузки
+    const uploadBtn = event.submitter || event.target.querySelector('.upload-btn');
+    const originalText = uploadBtn.innerHTML;
+    uploadBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Загрузка...';
+    uploadBtn.disabled = true;
+
+    // Блокируем кнопку проверки на время загрузки
+    const validateBtn = event.target.querySelector('.validate-btn');
+    if (validateBtn) {
+        validateBtn.disabled = true;
+    }
+
     fetch('/api/sales_statistics/upload', {
         method: 'POST',
         body: formData
@@ -413,6 +437,11 @@ function uploadStatistics(file, dataType) {
     .then(data => {
         const resultDiv = document.getElementById('uploadResult');
         
+        // Восстанавливаем кнопки
+        uploadBtn.innerHTML = originalText;
+        uploadBtn.disabled = false;
+        if (validateBtn) validateBtn.disabled = false;
+
         if (data.success) {
             let message = `
                 <div class="alert alert-success">
@@ -436,6 +465,9 @@ function uploadStatistics(file, dataType) {
             document.querySelectorAll('input[type="file"]').forEach(input => input.value = '');
             loadStatistics();
             
+            // Показываем всплывающее уведомление
+            showNotification('Файл успешно загружен!', 'success');
+            
         } else {
             resultDiv.innerHTML = `
                 <div class="alert alert-danger">
@@ -443,17 +475,53 @@ function uploadStatistics(file, dataType) {
                 </div>
             `;
             resultDiv.style.display = 'block';
+            showNotification('Ошибка при загрузке файла', 'error');
         }
     })
     .catch(error => {
         console.error('Error:', error);
+        
+        // Восстанавливаем кнопки при ошибке
+        uploadBtn.innerHTML = originalText;
+        uploadBtn.disabled = false;
+        if (validateBtn) validateBtn.disabled = false;
+        
         document.getElementById('uploadResult').innerHTML = `
             <div class="alert alert-danger">
                 <strong>❌ Ошибка при загрузке файла</strong>
             </div>
         `;
         document.getElementById('uploadResult').style.display = 'block';
+        showNotification('Ошибка при загрузке файла', 'error');
     });
+}
+
+// Функция для показа уведомлений
+function showNotification(message, type = 'info') {
+    // Создаем элемент уведомления
+    const notification = document.createElement('div');
+    notification.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+    notification.style.cssText = `
+        top: 20px;
+        right: 20px;
+        z-index: 9999;
+        min-width: 300px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    `;
+    
+    notification.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    document.body.appendChild(notification);
+    
+    // Автоматически скрываем через 5 секунд
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.remove();
+        }
+    }, 5000);
 }
 
 // Редактирование статистики
@@ -690,5 +758,20 @@ document.getElementById('editPeriod').value = new Date().toISOString().split('T'
 .small li {
     padding: 2px 0;
 }
+.position-fixed {
+    animation: slideInRight 0.3s ease-out;
+}
+
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
 </style>
 {% endblock %}
