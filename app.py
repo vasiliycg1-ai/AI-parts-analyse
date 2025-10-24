@@ -2479,43 +2479,68 @@ def manage_sales_statistics():
     """Главная страница управления статистикой продаж"""
     return render_template('sales_statistics.html')
 
+# В app.py
+
 @app.route('/api/sales_statistics')
 def api_sales_statistics():
-    """API для получения статистики продаж"""
+    """API для получения статистики продаж с пагинацией"""
+    # 1. Получаем параметры страницы из запроса
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 50, type=int) # 50 записей на страницу по умолчанию
+    offset = (page - 1) * per_page
+
+    # Получаем параметры фильтров
     data_type = request.args.get('data_type', 'all')
-    search = request.args.get('search', '')
+    volume_group = request.args.get('volume_group', 'all')
+    search = request.args.get('search', '').strip()
     conn = get_db_connection()
-    
-    query = '''
-    SELECT 
-        ss.*,
-        b.name as brand_name,
-        pc.main_article,
-        pc.name_ru
+
+    # 2. Базовый запрос и фильтры (как у вас, но без ORDER BY и LIMIT)
+    base_query = '''
     FROM sales_statistics ss
     JOIN parts_catalog pc ON ss.part_id = pc.id
     JOIN brands b ON pc.brand_id = b.id
     WHERE 1=1
     '''
-    
     params = []
-    
+
     if data_type != 'all':
-        query += ' AND ss.data_type = ?'
+        base_query += ' AND ss.data_type = ?'
         params.append(data_type)
-    
+
+    if volume_group != 'all':
+        base_query += ' AND ss.volume_group = ?'
+        params.append(volume_group)
+
     if search:
-        query += ' AND (pc.main_article LIKE ? OR b.name LIKE ?)'
+        base_query += ' AND (pc.main_article LIKE ? OR b.name LIKE ?)'
         search_term = f'%{search}%'
         params.extend([search_term, search_term])
-    
-    query += ' ORDER BY ss.period DESC, b.name, pc.main_article'
-    
-    stats = conn.execute(query, params).fetchall()
-    conn.close()
-    
-    return jsonify([dict(stat) for stat in stats])
 
+    # 3. Выполняем запрос для подсчета ОБЩЕГО количества записей
+    total_count_query = 'SELECT COUNT(ss.id) ' + base_query
+    total_count = conn.execute(total_count_query, params).fetchone()[0]
+
+    # 4. Выполняем основной запрос с LIMIT и OFFSET для получения только одной страницы
+    data_query = '''
+    SELECT
+        ss.*,
+        b.name as brand_name,
+        pc.main_article,
+        pc.name_ru
+    ''' + base_query + ' ORDER BY ss.period DESC, b.name, pc.main_article LIMIT ? OFFSET ?'
+    params.extend([per_page, offset])
+
+    stats = conn.execute(data_query, params).fetchall()
+    conn.close()
+
+    # 5. Возвращаем структурированный ответ с данными и мета-информацией о страницах
+    return jsonify({
+        'stats': [dict(stat) for stat in stats],
+        'total_count': total_count,
+        'current_page': page,
+        'total_pages': (total_count + per_page - 1) // per_page
+    })
     
 @app.route('/api/sales_statistics/upload', methods=['POST'])
 def api_sales_statistics_upload():

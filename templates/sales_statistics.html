@@ -93,6 +93,10 @@
                         </tbody>
                     </table>
                 </div>
+
+                <!-- 👇 ДОБАВЬТЕ ЭТОТ БЛОК ДЛЯ ПАГИНАЦИИ -->
+                <nav id="paginationContainer" class="mt-4 d-flex justify-content-center"></nav>
+
             </div>
         </div>
     </div>
@@ -300,52 +304,52 @@
 {% block scripts %}
 <script>
 let currentStats = [];
+let currentPage = 1; // Отслеживаем текущую страницу
 
-// Загрузка данных при открытии страницы
 document.addEventListener('DOMContentLoaded', function() {
-    loadStatistics();
+    loadStatistics(currentPage); // Загружаем первую страницу
     setupUploadForms();
 });
 
-// Загрузка статистики с фильтрами
-function loadStatistics() {
+// Загрузка статистики с фильтрами и номером страницы
+function loadStatistics(page = 1) {
+    currentPage = page; // Обновляем текущую страницу
+    const tbody = document.getElementById('statsTableBody');
+    tbody.innerHTML = '<tr><td colspan="10" class="text-center">Загрузка данных...</td></tr>';
+
     const dataType = document.getElementById('dataTypeFilter').value;
     const volumeGroup = document.getElementById('volumeGroupFilter').value;
     const search = document.getElementById('searchFilter').value;
-    
-    let url = '/api/sales_statistics';
-    const params = new URLSearchParams();
-    
+
+    const params = new URLSearchParams({
+        page: currentPage,
+        per_page: 50 // Можно сделать настраиваемым
+    });
+
     if (dataType !== 'all') params.append('data_type', dataType);
-    if (volumeGroup !== 'all') params.append('volume_group', volumeGroup);  // ← ДОБАВИЛИ
+    if (volumeGroup !== 'all') params.append('volume_group', volumeGroup);
     if (search) params.append('search', search);
-    
-    if (params.toString()) url += '?' + params.toString();
-    
-    fetch(url)
+
+    fetch(`/api/sales_statistics?${params.toString()}`)
         .then(response => response.json())
-        .then(stats => {
-            currentStats = stats;
-            displayStats(stats);
+        .then(data => {
+            currentStats = data.stats; // Теперь данные в data.stats
+            displayStats(data.stats);
+            updatePaginationUI(data.total_pages, data.current_page, data.total_count); // Новая функция
         })
         .catch(error => {
             console.error('Error:', error);
             alert('Ошибка при загрузке данных');
+            tbody.innerHTML = '<tr><td colspan="10" class="text-center text-danger">Ошибка загрузки</td></tr>';
         });
 }
-
 // Отображение статистики в таблице
 function displayStats(stats) {
     const tbody = document.getElementById('statsTableBody');
-    const countBadge = document.getElementById('statsCount');
-    
     if (stats.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" class="text-center">Нет данных по выбранным фильтрам</td></tr>';
-        countBadge.textContent = '0 записей';
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center">Нет данных по выбранным фильтрам</td></tr>';
         return;
     }
-    
-    countBadge.textContent = `${stats.length} записей`;
     
 tbody.innerHTML = stats.map(stat => {
     const typeBadge = getDataTypeBadge(stat.data_type);
@@ -372,6 +376,76 @@ tbody.innerHTML = stats.map(stat => {
     `;
 }).join('');
 }
+
+    // 🔥 ВОТ ПОЛНАЯ ВЕРСИЯ ФУНКЦИИ 🔥
+    function updatePaginationUI(totalPages, currentPage, totalCount) {
+        const paginationContainer = document.getElementById('paginationContainer');
+        const statsCount = document.getElementById('statsCount');
+
+        statsCount.textContent = `${totalCount} записей`;
+        paginationContainer.innerHTML = '';
+
+        if (totalPages <= 1) {
+            return; // Не показываем пагинацию, если страниц меньше или одна
+        }
+
+        let paginationHTML = '<ul class="pagination">';
+
+        // Кнопка "Назад"
+        paginationHTML += `
+            <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="event.preventDefault(); loadStatistics(${currentPage - 1})">Назад</a>
+            </li>`;
+
+        // Логика отображения номеров страниц (чтобы не выводить все 1000 страниц)
+        const pagesToShow = [];
+        const range = 2; // Сколько страниц показывать до и после текущей
+
+        pagesToShow.push(1); // Всегда показывать первую страницу
+
+        if (currentPage > range + 2) {
+            pagesToShow.push('...'); // Многоточие в начале
+        }
+
+        for (let i = Math.max(2, currentPage - range); i <= Math.min(totalPages - 1, currentPage + range); i++) {
+            if (!pagesToShow.includes(i)) {
+                pagesToShow.push(i);
+            }
+        }
+
+        if (currentPage < totalPages - range - 1) {
+            pagesToShow.push('...'); // Многоточие в конце
+        }
+
+        if (totalPages > 1 && !pagesToShow.includes(totalPages)) {
+             pagesToShow.push(totalPages); // Всегда показывать последнюю страницу
+        }
+
+        // Рендерим кнопки страниц
+        pagesToShow.forEach(pageNum => {
+            if (pageNum === '...') {
+                 paginationHTML += '<li class="page-item disabled"><span class="page-link">...</span></li>';
+            } else {
+                 paginationHTML += `
+                    <li class="page-item ${pageNum === currentPage ? 'active' : ''}">
+                        <a class="page-link" href="#" onclick="event.preventDefault(); loadStatistics(${pageNum})">${pageNum}</a>
+                    </li>`;
+            }
+        });
+
+
+        // Кнопка "Далее"
+        paginationHTML += `
+            <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="event.preventDefault(); loadStatistics(${currentPage + 1})">Далее</a>
+            </li>`;
+
+        paginationHTML += '</ul>';
+        paginationContainer.innerHTML = paginationHTML;
+    }
+
+
+
 
 // Вспомогательные функции для бейджей
 function getDataTypeBadge(dataType) {
@@ -607,13 +681,14 @@ function deleteStat() {
     });
 }
 
-// Сброс фильтров
-function clearFilters() {
-    document.getElementById('dataTypeFilter').value = 'all';
-    document.getElementById('volumeGroupFilter').value = 'all';
-    document.getElementById('searchFilter').value = '';
-    loadStatistics();
-}
+    // Сброс фильтров
+    function clearFilters() {
+        document.getElementById('dataTypeFilter').value = 'all';
+        document.getElementById('volumeGroupFilter').value = 'all';
+        document.getElementById('searchFilter').value = '';
+        loadStatistics(1); // Сбрасываем на первую страницу
+    }
+
 
 // Функция проверки файла
 function validateFile(file, dataType) {
