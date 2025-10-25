@@ -189,13 +189,11 @@
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="historyModalTitle">История изменения цен</h5>
+                <h5 class="modal-title">История цен</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body">
-                <div id="historyContent">
-                    <!-- Содержимое будет заполнено через JavaScript -->
-                </div>
+            <div class="modal-body" id="historyModalBody">
+                
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
@@ -296,6 +294,52 @@ function loadExpectedPrices() {
         });
 }
 
+// Функция для показа истории цен
+function showPriceHistory(partId, brandName, article) {
+    fetch(`/api/expected_prices/history/${partId}`)
+        .then(response => response.json())
+        .then(history => {
+            let html = `
+                <h5>История цен для ${brandName} ${article}</h5>
+                <div class="table-responsive mt-3">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Дата</th>
+                                <th>Цена (руб)</th>
+                                <th>Изменение</th>
+                                <th>Примечание</th>
+                                <th>Обновлено</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${history.map((item, index) => `
+                                <tr>
+                                    <td>${new Date(item.effective_date).toLocaleDateString()}</td>
+                                    <td>${item.price_rub.toFixed(2)}</td>
+                                    <td>
+                                        ${item.difference_percent !== null ? `
+                                            <span class="${item.difference_percent > 0 ? 'text-success' : 'text-danger'}">
+                                                ${item.difference_percent > 0 ? '+' : ''}${item.difference_percent}%
+                                            </span>
+                                        ` : '-'}
+                                    </td>
+                                    <td>${item.notes || '-'}</td>
+                                    <td>${new Date(item.updated_at).toLocaleDateString()}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            
+            const modal = new bootstrap.Modal(document.getElementById('historyModal'));
+            document.getElementById('historyModalBody').innerHTML = html;
+            modal.show();
+        });
+}
+
+
 // Обновленная функция отображения цен
 function displayPrices(prices) {
     const tbody = document.getElementById('pricesTableBody');
@@ -321,6 +365,10 @@ function displayPrices(prices) {
                 <button class="btn btn-sm btn-outline-primary" 
                         onclick="editPrice(${price.id})">
                     <i class="bi bi-pencil"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" 
+                        onclick="showPriceHistory(${price.part_id}, '${price.brand_name}', '${price.main_article}')">
+                    <i class="bi bi-clock-history"></i>
                 </button>
             </td>
         </tr>
@@ -393,35 +441,6 @@ function savePrice() {
 }
 
 
-
-// Показать историю цен
-// Показать историю цен - ОБНОВЛЕННАЯ ВЕРСИЯ
-function showPriceHistory(priceId) {
-    // Закрываем модальное окно редактирования
-    bootstrap.Modal.getInstance(document.getElementById('editPriceModal')).hide();
-    
-    // Загружаем историю
-    fetch(`/api/expected_prices/history/${priceId}`)
-        .then(response => response.json())
-        .then(history => {
-            if (history.length === 0) {
-                document.getElementById('historyModalTitle').textContent = 'История цен';
-                document.getElementById('historyContent').innerHTML = '<p class="text-muted">Нет данных по истории</p>';
-            } else {
-                const item = history[0];
-                document.getElementById('historyModalTitle').textContent = 
-                    `История цен: ${item.brand_name} - ${item.main_article}`;
-                
-                // ... остальной код отображения истории
-            }
-            
-            new bootstrap.Modal(document.getElementById('historyModal')).show();
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert('Ошибка при загрузке истории');
-        });
-}
 
 
 // Вспомогательная функция для получения ID бренда
@@ -503,10 +522,6 @@ document.getElementById('editEffectiveDate').value = new Date().toISOString().sp
 .table td {
     vertical-align: middle;
 }
-.text-success {
-    color: #198754 !important;
-    font-weight: bold;
-}
 .filter-card .form-label {
     font-size: 0.875rem;
     font-weight: 500;
@@ -522,6 +537,10 @@ document.getElementById('editEffectiveDate').value = new Date().toISOString().sp
 .text-success {
     color: #198754 !important;
     font-weight: bold;
+}
+.text-danger {
+    color: #dc3545 !important;
+    font-weight: 500;
 }
 </style>
 

@@ -2317,15 +2317,30 @@ def api_expected_prices():
     conn = get_db_connection()
     
     query = '''
-    SELECT 
-        esp.*,
-        b.name as brand_name,
-        pc.main_article,
-        pc.name_ru
-    FROM expected_sale_prices esp
-    JOIN parts_catalog pc ON esp.part_id = pc.id
-    JOIN brands b ON pc.brand_id = b.id
-    ORDER BY b.name, pc.main_article
+        SELECT 
+            p.id,
+            p.part_id,
+            b.name AS brand_name,
+            pc.main_article,
+            pc.name_ru,
+            p.price_rub,
+            p.effective_date,
+            p.notes,
+            p.created_at,
+            p.updated_at
+        FROM expected_sale_prices p
+        JOIN parts_catalog pc ON p.part_id = pc.id
+        JOIN brands b ON pc.brand_id = b.id
+        WHERE p.id IN (
+            SELECT id FROM (
+                SELECT 
+                    id,
+                    part_id,
+                    ROW_NUMBER() OVER (PARTITION BY part_id ORDER BY effective_date DESC, created_at DESC) as rn
+                FROM expected_sale_prices
+            ) WHERE rn = 1
+        )
+        ORDER BY b.name, pc.main_article
     '''
     
     prices = conn.execute(query).fetchall()
@@ -2334,23 +2349,48 @@ def api_expected_prices():
     return jsonify([dict(price) for price in prices])
 
 
-@app.route('/api/expected_prices/history/<int:price_id>')
-def api_expected_prices_history(price_id):
-    """API для получения истории цен по конкретной записи"""
+@app.route('/api/expected_prices/history/<int:part_id>')
+def api_expected_prices_history(part_id):
+    """API для получения истории цен по конкретной детали"""
     conn = get_db_connection()
-    
-    history = conn.execute('''
-        SELECT esp.*, b.name as brand_name, pc.main_article
-        FROM expected_sale_prices esp
-        JOIN parts_catalog pc ON esp.part_id = pc.id
-        JOIN brands b ON pc.brand_id = b.id
-        WHERE esp.id = ?
-        ORDER BY esp.effective_date DESC
-    ''', (price_id,)).fetchall()
-    
-    conn.close()
-    
-    return jsonify([dict(item) for item in history])
+    try:
+        # Получаем текущую цену
+        current_price = conn.execute('''
+            SELECT price_rub FROM expected_sale_prices
+            WHERE part_id = ?
+            ORDER BY effective_date DESC, created_at DESC
+            LIMIT 1
+        ''', (part_id,)).fetchone()
+        
+        current_price_value = current_price['price_rub'] if current_price else None
+        
+        # Получаем историю
+        history = conn.execute('''
+            SELECT 
+                id,
+                price_rub,
+                effective_date,
+                notes,
+                updated_at
+            FROM expected_sale_prices
+            WHERE part_id = ?
+            ORDER BY effective_date DESC, updated_at DESC
+        ''', (part_id,)).fetchall()
+        
+        # Преобразуем в словарь и добавляем разницу в процентах
+        history_data = []
+        for item in history:
+            item_dict = dict(item)
+            if current_price_value:
+                difference = ((current_price_value - item['price_rub']) / item['price_rub']) * 100
+                item_dict['difference_percent'] = round(difference, 2)
+            else:
+                item_dict['difference_percent'] = None
+            history_data.append(item_dict)
+        
+        return jsonify(history_data)
+    finally:
+        conn.close()
 
 @app.route('/api/expected_prices/upload', methods=['POST'])
 def api_expected_prices_upload():
