@@ -69,7 +69,7 @@
     <div class="card-header">
         <h5><i class="bi bi-funnel"></i> Фильтры и поиск</h5>
     </div>
-    <div class="card-body">
+    <div class="card-body pages">
         <div class="row g-3">
             <div class="col-md-3">
                 <label class="form-label">Марка</label>
@@ -207,6 +207,9 @@
 <script>
 let currentPrices = [];
 let allBrands = [];
+let currentPage = 1;
+let totalPages = 1;
+const perPage = 50;
 
 // Загрузка данных при открытии страницы
 document.addEventListener('DOMContentLoaded', function() {
@@ -240,28 +243,10 @@ function populateBrandFilter() {
     });
 }
 
-// Применение фильтров
+
+// Применение фильтров - теперь перезагружает с сервера
 function applyFilters() {
-    const brandFilter = document.getElementById('brandFilter').value.toLowerCase();
-    const articleFilter = document.getElementById('articleFilter').value.toLowerCase();
-    const nameFilter = document.getElementById('nameFilter').value.toLowerCase();
-    const dateFrom = document.getElementById('dateFromFilter').value;
-    const dateTo = document.getElementById('dateToFilter').value;
-    const priceFrom = parseFloat(document.getElementById('priceFromFilter').value) || 0;
-    const priceTo = parseFloat(document.getElementById('priceToFilter').value) || Infinity;
-
-    const filteredPrices = currentPrices.filter(price => {
-        const brandMatch = !brandFilter || price.brand_name.toLowerCase().includes(brandFilter);
-        const articleMatch = !articleFilter || price.main_article.toLowerCase().includes(articleFilter);
-        const nameMatch = !nameFilter || (price.name_ru && price.name_ru.toLowerCase().includes(nameFilter));
-        const dateMatch = (!dateFrom || price.effective_date >= dateFrom) && 
-                         (!dateTo || price.effective_date <= dateTo);
-        const priceMatch = price.price_rub >= priceFrom && price.price_rub <= priceTo;
-
-        return brandMatch && articleMatch && nameMatch && dateMatch && priceMatch;
-    });
-
-    displayPrices(filteredPrices);
+    loadExpectedPrices(1); // Сбрасываем на первую страницу
 }
 
 // Сброс фильтров
@@ -274,25 +259,90 @@ function clearFilters() {
     document.getElementById('priceFromFilter').value = '';
     document.getElementById('priceToFilter').value = '';
     
-    displayPrices(currentPrices);
+    loadExpectedPrices(1);
 }
 
 
-
-// Обновленная функция загрузки цен
-function loadExpectedPrices() {
-    fetch('/api/expected_prices')
+// НОВАЯ функция загрузки с серверной пагинацией
+function loadExpectedPrices(page = 1) {
+    currentPage = page;
+    
+    // Собираем параметры фильтров
+    const params = new URLSearchParams({
+        page: currentPage,
+        per_page: perPage,
+        brand: document.getElementById('brandFilter')?.value || '',
+        article: document.getElementById('articleFilter')?.value || '',
+        name: document.getElementById('nameFilter')?.value || '',
+        date_from: document.getElementById('dateFromFilter')?.value || '',
+        date_to: document.getElementById('dateToFilter')?.value || '',
+        price_from: document.getElementById('priceFromFilter')?.value || '',
+        price_to: document.getElementById('priceToFilter')?.value || ''
+    });
+    
+    fetch(`/api/expected_prices?${params}`)
         .then(response => response.json())
-        .then(prices => {
-            currentPrices = prices;
-            displayPrices(prices);
-            updateStats(prices.length);
+        .then(data => {
+            currentPrices = data.prices;
+            totalPages = data.total_pages;
+            displayPrices(data.prices);
+            updateStats(data.total_count);
+            renderPagination();
         })
         .catch(error => {
             console.error('Error:', error);
             alert('Ошибка при загрузке данных');
         });
 }
+
+// НОВАЯ функция рендеринга пагинации
+function renderPagination() {
+    const countBadge = document.getElementById('pricesCount');
+    const paginationHtml = `
+        <div class="d-flex justify-content-between align-items-center mt-3">
+            <div>
+                <button class="btn btn-sm btn-outline-primary" 
+                        onclick="loadExpectedPrices(1)" 
+                        ${currentPage === 1 ? 'disabled' : ''}>
+                    <i class="bi bi-chevron-double-left"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-primary" 
+                        onclick="loadExpectedPrices(${currentPage - 1})" 
+                        ${currentPage === 1 ? 'disabled' : ''}>
+                    <i class="bi bi-chevron-left"></i> Назад
+                </button>
+            </div>
+            
+            <span class="text-muted">
+                Страница ${currentPage} из ${totalPages}
+            </span>
+            
+            <div>
+                <button class="btn btn-sm btn-outline-primary" 
+                        onclick="loadExpectedPrices(${currentPage + 1})" 
+                        ${currentPage === totalPages ? 'disabled' : ''}>
+                    Вперед <i class="bi bi-chevron-right"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-primary" 
+                        onclick="loadExpectedPrices(${totalPages})" 
+                        ${currentPage === totalPages ? 'disabled' : ''}>
+                    <i class="bi bi-chevron-double-right"></i>
+                </button>
+            </div>
+        </div>
+    `;
+    
+    // Вставляем пагинацию после таблицы
+    let paginationContainer = document.getElementById('paginationContainer');
+    if (!paginationContainer) {
+        paginationContainer = document.createElement('div');
+        paginationContainer.id = 'paginationContainer';
+        document.querySelector('.pages').appendChild(paginationContainer);
+    }
+    paginationContainer.innerHTML = paginationHtml;
+}
+
+
 
 // Функция для показа истории цен
 function showPriceHistory(partId, brandName, article) {

@@ -2313,21 +2313,25 @@ def manage_expected_prices():
 
 @app.route('/api/expected_prices')
 def api_expected_prices():
-    """API для получения актуальных цен продажи"""
+    """API для получения актуальных цен продажи с пагинацией и фильтрами"""
+    # Параметры пагинации
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 50, type=int)
+    offset = (page - 1) * per_page
+    
+    # Параметры фильтров
+    brand_filter = request.args.get('brand', '').strip()
+    article_filter = request.args.get('article', '').strip()
+    name_filter = request.args.get('name', '').strip()
+    date_from = request.args.get('date_from', '').strip()
+    date_to = request.args.get('date_to', '').strip()
+    price_from = request.args.get('price_from', type=float)
+    price_to = request.args.get('price_to', type=float)
+    
     conn = get_db_connection()
     
-    query = '''
-        SELECT 
-            p.id,
-            p.part_id,
-            b.name AS brand_name,
-            pc.main_article,
-            pc.name_ru,
-            p.price_rub,
-            p.effective_date,
-            p.notes,
-            p.created_at,
-            p.updated_at
+    # Базовый запрос
+    base_query = '''
         FROM expected_sale_prices p
         JOIN parts_catalog pc ON p.part_id = pc.id
         JOIN brands b ON pc.brand_id = b.id
@@ -2340,13 +2344,69 @@ def api_expected_prices():
                 FROM expected_sale_prices
             ) WHERE rn = 1
         )
-        ORDER BY b.name, pc.main_article
     '''
     
-    prices = conn.execute(query).fetchall()
+    params = []
+    
+    # Добавляем фильтры
+    if brand_filter:
+        base_query += ' AND b.name LIKE ?'
+        params.append(f'%{brand_filter}%')
+    
+    if article_filter:
+        base_query += ' AND pc.main_article LIKE ?'
+        params.append(f'%{article_filter}%')
+    
+    if name_filter:
+        base_query += ' AND pc.name_ru LIKE ?'
+        params.append(f'%{name_filter}%')
+    
+    if date_from:
+        base_query += ' AND p.effective_date >= ?'
+        params.append(date_from)
+    
+    if date_to:
+        base_query += ' AND p.effective_date <= ?'
+        params.append(date_to)
+    
+    if price_from is not None:
+        base_query += ' AND p.price_rub >= ?'
+        params.append(price_from)
+    
+    if price_to is not None:
+        base_query += ' AND p.price_rub <= ?'
+        params.append(price_to)
+    
+    # Подсчет общего количества
+    count_query = 'SELECT COUNT(DISTINCT p.id) ' + base_query
+    total_count = conn.execute(count_query, params).fetchone()[0]
+    
+    # Запрос данных с пагинацией
+    data_query = '''
+        SELECT 
+            p.id,
+            p.part_id,
+            b.name AS brand_name,
+            pc.main_article,
+            pc.name_ru,
+            p.price_rub,
+            p.effective_date,
+            p.notes,
+            p.created_at,
+            p.updated_at
+    ''' + base_query + ' ORDER BY b.name, pc.main_article LIMIT ? OFFSET ?'
+    
+    params.extend([per_page, offset])
+    
+    prices = conn.execute(data_query, params).fetchall()
     conn.close()
     
-    return jsonify([dict(price) for price in prices])
+    return jsonify({
+        'prices': [dict(price) for price in prices],
+        'total_count': total_count,
+        'current_page': page,
+        'total_pages': (total_count + per_page - 1) // per_page
+    })
 
 
 @app.route('/api/expected_prices/history/<int:part_id>')
